@@ -1,0 +1,58 @@
+# Pipeline configuration for the agentic data analyst.
+#
+# Per spec Part 12 §1: Opus for high-reasoning agents (Root Cause Investigator,
+# Findings Validator, Opportunity Identifier); Sonnet for lighter work; middle
+# analytical agents (Relationship, Pattern, Time Series) start on Sonnet and may
+# escalate to Opus per Week 1 testing telemetry.
+#
+# Model IDs use Anthropic's stable model identifiers. Update as new versions ship.
+
+model_per_agent:
+  question-framer: claude-sonnet-4-6
+  data-retrieval-agent: claude-sonnet-4-6
+  data-profiler: claude-sonnet-4-6
+  relationship-analyzer: claude-sonnet-4-6
+  pattern-discoverer: claude-sonnet-4-6
+  time-series-analyzer: claude-sonnet-4-6
+  root-cause-investigator: claude-opus-4-7
+  opportunity-identifier: claude-opus-4-7
+  findings-validator: claude-opus-4-7
+  communication-agent: claude-sonnet-4-6
+
+# Per-agent budgets are advisory in MVP (telemetry only). The Question Framer
+# sets `token_budget` per run; this is the default cap if the framer omits it.
+budget_tokens_default: 1200000
+
+# Approximate cost per million tokens. Used by the BudgetTracker for telemetry.
+# Update these as Anthropic adjusts pricing. Values below are placeholders aligned
+# with public list pricing tiers.
+cost_per_million:
+  claude-opus-4-7:
+    input: 15.00
+    output: 75.00
+    cache_read: 1.50
+    cache_write: 18.75
+  claude-sonnet-4-6:
+    input: 3.00
+    output: 15.00
+    cache_read: 0.30
+    cache_write: 3.75
+
+# Maximum tokens per agent response. Most agents emit a single JSON object; 8K
+# is a comfortable ceiling. Increase per-agent in code if a specific agent
+# (Communication Agent rendering many cards) needs more headroom.
+max_tokens_per_call: 8192
+
+# Number of retries per logical failure (schema validation, lineage gap, etc.).
+# Per failure-recovery.md §1: one retry is the default. Distinguishes transient
+# from systematic without burning budget on systematic confusion.
+max_retries_per_stage: 1
+
+# Auto-sample threshold per pipeline-definitions.md §10. Datasets larger than
+# this either auto-sample (with high-severity caveat) or fail the stage in
+# favor of the Snowflake/Cortex path.
+row_threshold: 5000000
+
+# Parallelism cap for sibling analytical agents (pipeline-definitions.md §5.3).
+# MVP serializes; this is here for when the parallel-group execution lands.
+max_parallel_concurrency: 3
