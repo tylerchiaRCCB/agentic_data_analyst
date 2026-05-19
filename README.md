@@ -78,7 +78,7 @@ Not yet built (deferred): demo data generator (no scenarios until late next week
 
 ## Quickstart
 
-Requires Python 3.11+ and an `ANTHROPIC_API_KEY` environment variable.
+Requires Python 3.11+ and (for real runs) an `ANTHROPIC_API_KEY` environment variable.
 
 ```bash
 # Install with uv (recommended)
@@ -86,21 +86,47 @@ uv sync
 
 # Or with pip
 pip install -e .
+```
 
-# Run against a CSV — contextless (no domain context document yet)
+### Verify locally (no API calls, no tokens spent)
+
+```bash
+# Unit tests
+uv run pytest
+
+# Generate the smoke-test CSV (100 rows, generic CPG-shaped — NOT the real demo data)
+uv run python -m data.generators.generate_smoke_test
+
+# Dry-run: loads data, sanitizes free-text, assembles every agent's prompt, validates
+# schemas, writes a report to output/dry-run-<id>.md. Zero API calls.
+uv run python -m src.main \
+  --question "smoke test" \
+  --data data/sample/smoke-test.csv \
+  --dry-run
+```
+
+A successful dry-run prints a per-agent prompt-size table and confirms `Plumbing verification PASSED`.
+
+### First real run
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-python -m src.main \
+uv run python -m src.main \
   --question "What patterns are present in this dataset?" \
-  --data path/to/your.csv
+  --data data/sample/smoke-test.csv
+```
 
-# Or proactive monitoring with a scheduled prompt config
-python -m src.main \
+### Production-style invocations
+
+```bash
+# Proactive monitoring with a scheduled prompt config
+uv run python -m src.main \
   --scheduled \
   --prompt-config config/prompts/weekly-anomaly-scan.yaml \
   --data path/to/your.csv
 
 # Once a domain context document exists, name it with --domain
-python -m src.main \
+uv run python -m src.main \
   --question "..." \
   --data path/to/your.csv \
   --domain commercial-sales

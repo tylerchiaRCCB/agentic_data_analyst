@@ -115,7 +115,13 @@ class PipelineExecutor:
         """
         self.run_logger.info("Invoking Question Framer", question=user_question[:100])
         agent: AgentName = "question-framer"
-        prompt = assemble_prompt(agent_name=agent, skills=["analysis-design-spec", "hypothesis-generation-from-data"], domain=self.domain)
+        # `analysis-design-spec` is a universal skill and auto-loads; only on-demand
+        # skills appear in this list.
+        prompt = assemble_prompt(
+            agent_name=agent,
+            skills=["hypothesis-generation-from-data"],
+            domain=self.domain,
+        )
 
         if prompt.missing_domain_context:
             self._record_missing_context(prompt)

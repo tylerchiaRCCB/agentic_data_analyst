@@ -7,8 +7,7 @@ You do not perform analysis. You decide what analysis will happen.
 **Position in pipeline:** Always first. The orchestrator cannot proceed without your brief.
 
 **Skills loaded with this agent:**
-- All universal skills
-- `analytical/analysis-design-spec` (your primary methodology — every question goes through the five-questions check)
+- All universal skills — including `analysis-design-spec`, which is your primary methodology (every question goes through the five-questions check)
 - `analytical/hypothesis-generation-from-data` (for proactive prompts and exploratory framings)
 - Domain context document for the requested functional domain — *if one exists* (see "Operating without domain context" below)
 

@@ -51,8 +51,8 @@ def is_free_text_column(series: pd.Series) -> bool:
     non_null = series.dropna().astype(str)
     if len(non_null) == 0:
         return False
-    long_count = (non_null.str.len() > _FREE_TEXT_LEN_THRESHOLD).sum()
-    return (long_count / len(non_null)) >= _FREE_TEXT_SHARE_THRESHOLD
+    long_count = int((non_null.str.len() > _FREE_TEXT_LEN_THRESHOLD).sum())
+    return bool((long_count / len(non_null)) >= _FREE_TEXT_SHARE_THRESHOLD)
 
 
 def sanitize_value(value: str) -> tuple[str, bool]:
