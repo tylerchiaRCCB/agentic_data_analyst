@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enums and aliases
@@ -31,6 +31,33 @@ AgentName = Literal[
     "findings-validator",
     "communication-agent",
 ]
+
+_CANONICAL_AGENTS: set[str] = {
+    "question-framer", "data-retrieval-agent", "data-profiler",
+    "relationship-analyzer", "pattern-discoverer", "time-series-analyzer",
+    "root-cause-investigator", "opportunity-identifier",
+    "findings-validator", "communication-agent",
+}
+
+
+def normalize_agent_name(name: str) -> str:
+    """Map common variants the model produces (e.g., trailing -agent on bare names,
+    underscores instead of hyphens) to the canonical agent name. Returns the
+    original name unchanged if no canonical match is found.
+    """
+    if name in _CANONICAL_AGENTS:
+        return name
+    candidates = [
+        name,
+        name.replace("_", "-").lower(),
+        name.removesuffix("-agent") if name.endswith("-agent") else f"{name}-agent",
+        name.replace("_", "-").lower().removesuffix("-agent"),
+        f"{name.replace('_', '-').lower()}-agent",
+    ]
+    for c in candidates:
+        if c in _CANONICAL_AGENTS:
+            return c
+    return name  # let Pydantic surface the issue if still invalid
 
 ConfidenceGrade = Literal["A", "B", "C", "D", "F"]
 CaveatSeverity = Literal["low", "medium", "high"]
@@ -88,7 +115,37 @@ class Statistic(StrictModel):
 class Caveat(StrictModel):
     text: str
     severity: CaveatSeverity
-    reason: str
+    reason: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_caveat(cls, data: Any) -> Any:
+        """Accept common variant field names agents produce in practice.
+
+        Observed in real runs:
+        - `text` aliased as `description`, `caveat`, `message`
+        - `reason` aliased as `category`, `scope`, `resolution`, `cause`
+        Defaults `reason` to "" if no variant supplied.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        if "text" not in d:
+            for alt in ("description", "caveat", "message"):
+                if alt in d:
+                    d["text"] = d.pop(alt)
+                    break
+
+        if "reason" not in d:
+            for alt in ("category", "scope", "resolution", "cause"):
+                if alt in d:
+                    d["reason"] = d.pop(alt)
+                    break
+            else:
+                d["reason"] = ""
+
+        return d
 
 
 class Hypothesis(StrictModel):
@@ -137,12 +194,101 @@ class QuestionFramerPayload(StrictModel):
     analytical_questions: list[str]
     hypotheses: list[Hypothesis] = Field(default_factory=list)
     data_requirements: dict[str, Any]
-    decision_context: str
-    success_criteria: str
+    decision_context: str = ""
+    success_criteria: str = ""
     pipeline_composition: list[PipelineStage]
     output_mode: OutputMode
     investigation_mode: InvestigationMode
-    token_budget: int
+    token_budget: int = 0
+    # Optional richer form the model often produces — kept verbatim for downstream access
+    success_definition: dict[str, Any] | None = None
+    # Optional top-level run caveats the framer can surface (e.g., missing context)
+    caveats: list[Any] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_framer_input(cls, data: Any) -> Any:
+        """Coerce the model's natural output shapes into the canonical schema.
+
+        Real-world framer responses sometimes use richer or differently-named fields
+        than the canonical schema; this normalizer makes the orchestrator robust to
+        common variations without forcing the model into rigid formatting.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        # success_definition (rich object) vs. success_criteria (string)
+        if "success_criteria" not in d and "success_definition" in d:
+            sd = d["success_definition"]
+            if isinstance(sd, dict):
+                parts = [f"{k}: {v}" for k, v in sd.items()]
+                d["success_criteria"] = "\n".join(parts)
+            elif sd is not None:
+                d["success_criteria"] = str(sd)
+
+        # token_budget: accept int, dict {total, per_stage}, or numeric string
+        tb = d.get("token_budget")
+        if isinstance(tb, dict):
+            total = tb.get("total")
+            if total is None:
+                per_stage = tb.get("per_stage") or {}
+                total = sum(v for v in per_stage.values() if isinstance(v, (int, float)))
+            d["token_budget"] = int(total or 0)
+        elif isinstance(tb, str):
+            try:
+                d["token_budget"] = int(tb)
+            except ValueError:
+                d["token_budget"] = 0
+
+        # pipeline_composition: coerce bare strings -> single stages, bare lists -> parallel groups
+        # Also normalize any non-canonical agent names (e.g., "data-profiler-agent" -> "data-profiler").
+        pc = d.get("pipeline_composition")
+        if isinstance(pc, list):
+            normalized: list[Any] = []
+            for stage in pc:
+                if isinstance(stage, str):
+                    normalized.append({"agent": normalize_agent_name(stage), "skills": []})
+                elif isinstance(stage, list):
+                    parallel_stages = []
+                    for sub in stage:
+                        if isinstance(sub, str):
+                            parallel_stages.append({"agent": normalize_agent_name(sub), "skills": []})
+                        elif isinstance(sub, dict):
+                            if "agent" in sub and isinstance(sub["agent"], str):
+                                sub = {**sub, "agent": normalize_agent_name(sub["agent"])}
+                            sub.setdefault("skills", [])
+                            parallel_stages.append(sub)
+                        else:
+                            parallel_stages.append(sub)
+                    normalized.append({"parallel": parallel_stages})
+                elif isinstance(stage, dict):
+                    # Already structured; ensure `skills` exists and normalize the agent name
+                    if "agent" in stage and isinstance(stage["agent"], str):
+                        stage = {**stage, "agent": normalize_agent_name(stage["agent"])}
+                    if "agent" in stage and "skills" not in stage:
+                        stage = {**stage, "skills": []}
+                    normalized.append(stage)
+                else:
+                    # Already a Pydantic object or other typed value — pass through
+                    normalized.append(stage)
+            d["pipeline_composition"] = normalized
+
+        # output_mode: coerce model-invented hybrids to one of the three canonical modes.
+        # Anything mentioning "action" maps to action-card (which already supports
+        # mixed cards + descriptive-summary output). Anything mentioning "narrative"
+        # maps to narrative. Otherwise default to descriptive-summary.
+        om = d.get("output_mode")
+        if isinstance(om, str) and om not in {"narrative", "action-card", "descriptive-summary"}:
+            lower = om.lower()
+            if "action" in lower or "card" in lower:
+                d["output_mode"] = "action-card"
+            elif "narrative" in lower:
+                d["output_mode"] = "narrative"
+            else:
+                d["output_mode"] = "descriptive-summary"
+
+        return d
 
 
 class ColumnMetadata(StrictModel):

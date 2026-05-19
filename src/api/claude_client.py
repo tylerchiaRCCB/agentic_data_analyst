@@ -77,13 +77,17 @@ class ClaudeClient:
         self,
         *,
         model: str,
-        system: str,
+        system: str | list[dict[str, Any]],
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         enable_code_execution: bool = True,
         extra_tools: list[dict[str, Any]] | None = None,
     ) -> ClaudeResponse:
         """Call Claude with the given system prompt and messages.
+
+        `system` may be a plain string OR a list of structured content blocks. The list
+        form enables prompt caching via `{"type": "text", "text": "...",
+        "cache_control": {"type": "ephemeral"}}` blocks — see prompt_assembler.py.
 
         Handles rate-limit retries with exponential backoff per failure-recovery.md §4.2.
         Other errors propagate; the caller decides how to handle.

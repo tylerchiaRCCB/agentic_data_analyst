@@ -274,7 +274,7 @@ class PipelineExecutor:
             t0 = time.perf_counter()
             response: ClaudeResponse = self.client.call(
                 model=model,
-                system=prompt.system_prompt,
+                system=prompt.system_blocks,  # structured form enables prompt caching
                 messages=messages,
                 max_tokens=self.config.max_tokens_per_call,
                 enable_code_execution=True,
