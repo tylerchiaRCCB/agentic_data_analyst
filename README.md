@@ -109,8 +109,22 @@ A successful dry-run prints a per-agent prompt-size table and confirms `Plumbing
 
 ### First real run
 
+First, set up your API key. Two equivalent options:
+
+**Option A — `.env` file (recommended; persists across terminal sessions):**
+```bash
+cp .env.example .env
+# Edit .env and replace the placeholder with your real key.
+# The .env file is gitignored — it will never be committed.
+```
+
+**Option B — shell export (ephemeral, per-terminal):**
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Then run:
+```bash
 uv run python -m src.main \
   --question "What patterns are present in this dataset?" \
   --data data/sample/smoke-test.csv

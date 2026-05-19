@@ -37,8 +37,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 from src.api.claude_client import ClaudeClient
+
+# Load environment variables from .env in the repo root (if present).
+# Real shell env vars take precedence over .env values.
+load_dotenv()
 from src.data_access.excel_loader import load_tabular
 from src.observability.run_logger import RunLogger, make_run_id
 from src.observability.tracer import Tracer
