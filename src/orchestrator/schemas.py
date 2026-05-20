@@ -41,6 +41,32 @@ _CANONICAL_AGENTS: set[str] = {
 }
 
 
+def _canonicalize_dtype(dt: Any) -> str:
+    """Map common pandas/numpy/python dtype strings to canonical ColumnSpec values.
+
+    Canonical values: string | integer | float | boolean | datetime | category.
+    """
+    if not isinstance(dt, str):
+        return "string"
+    lower = dt.lower().strip()
+    if lower in {"string", "integer", "float", "boolean", "datetime", "category"}:
+        return lower
+    # Pandas / numpy variants
+    if lower in {"object", "str", "string_", "unicode", "u"} or lower.startswith(("str", "u")):
+        return "string"
+    if lower in {"int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "int_", "i", "uint"} or lower.startswith(("int", "uint", "i8", "i4", "i2", "i1")):
+        return "integer"
+    if lower in {"float16", "float32", "float64", "float_", "f", "double"} or lower.startswith(("float", "f4", "f8")):
+        return "float"
+    if lower in {"bool", "bool_", "boolean", "b"}:
+        return "boolean"
+    if lower.startswith(("datetime", "date", "timestamp", "m8", "<m8", ">m8", "datetime64")):
+        return "datetime"
+    if lower in {"category", "categorical"}:
+        return "category"
+    return "string"  # safe default
+
+
 def normalize_agent_name(name: str) -> str:
     """Map common variants the model produces (e.g., trailing -agent on bare names,
     underscores instead of hyphens) to the canonical agent name. Returns the
@@ -393,7 +419,7 @@ class DataRetrievalPayload(StrictModel):
             return data
         d = dict(data)
 
-        # Normalize schema: bare strings → ColumnSpec dicts
+        # Normalize schema: bare strings → ColumnSpec dicts; pandas dtypes → canonical
         sch = d.get("schema") or d.get("schema_columns")
         if isinstance(sch, list):
             normalized = []
@@ -401,18 +427,18 @@ class DataRetrievalPayload(StrictModel):
                 if isinstance(item, str):
                     normalized.append({"name": item, "dtype": "string", "nullable": True})
                 elif isinstance(item, dict):
-                    # Ensure required fields exist
                     item = {**item}
                     item.setdefault("dtype", "string")
                     item.setdefault("nullable", True)
+                    # Coerce common pandas/numpy/python dtype strings to canonical Literal values
+                    item["dtype"] = _canonicalize_dtype(item.get("dtype", "string"))
                     normalized.append(item)
                 else:
                     normalized.append(item)
-            # Always normalize back into the alias the model expects
             d["schema"] = normalized
             d.pop("schema_columns", None)
 
-        # Normalize column_metadata: ensure is_free_text defaults to False
+        # Normalize column_metadata: ensure is_free_text defaults to False; canonicalize dtype
         cm = d.get("column_metadata")
         if isinstance(cm, list):
             normalized_cm = []
@@ -422,7 +448,9 @@ class DataRetrievalPayload(StrictModel):
                     item.setdefault("is_free_text", False)
                     item.setdefault("null_count", 0)
                     item.setdefault("distinct_count", 0)
-                    item.setdefault("dtype", "string")
+                    # ColumnMetadata.dtype is a free-form str (not Literal), so canonicalization
+                    # is not strictly required here — but doing it keeps downstream consistent.
+                    item["dtype"] = _canonicalize_dtype(item.get("dtype", "string"))
                     normalized_cm.append(item)
                 else:
                     normalized_cm.append(item)
