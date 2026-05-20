@@ -172,6 +172,19 @@ class Caveat(StrictModel):
             else:
                 d["reason"] = ""
 
+        # Coerce common severity variants to canonical low/medium/high
+        sev = d.get("severity")
+        if isinstance(sev, str) and sev not in {"low", "medium", "high"}:
+            lower = sev.lower()
+            if lower in {"critical", "urgent", "blocker", "severe", "blocking"}:
+                d["severity"] = "high"
+            elif lower in {"warning", "warn", "moderate"}:
+                d["severity"] = "medium"
+            elif lower in {"info", "informational", "minor", "trivial", "note"}:
+                d["severity"] = "low"
+            else:
+                d["severity"] = "medium"
+
         return d
 
 
