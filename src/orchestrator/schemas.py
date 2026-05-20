@@ -526,10 +526,12 @@ class PatternDiscovererPayload(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_pattern_discoverer(cls, data: Any) -> Any:
-        """Map verbose technique descriptions to the canonical Literal values."""
+        """Map verbose technique descriptions and method-summary dicts to canonical forms."""
         if not isinstance(data, dict):
             return data
         d = dict(data)
+
+        # techniques_applied: verbose descriptions → canonical Literal values
         techs = d.get("techniques_applied")
         if isinstance(techs, list):
             normalized: list[str] = []
@@ -548,6 +550,28 @@ class PatternDiscovererPayload(StrictModel):
                 if canonical not in normalized:
                     normalized.append(canonical)
             d["techniques_applied"] = normalized
+
+        # structural_outliers: if agent returned a method-summary dict instead of a list,
+        # extract the embedded list of findings (or default to empty).
+        so = d.get("structural_outliers")
+        if isinstance(so, dict):
+            extracted = None
+            for key in ("outliers", "findings", "detected_outliers", "items", "results", "structural_outliers"):
+                if key in so and isinstance(so[key], list):
+                    extracted = so[key]
+                    break
+            d["structural_outliers"] = extracted if extracted is not None else []
+
+        # Same defensive pattern for generated_hypotheses, in case it appears wrapped
+        gh = d.get("generated_hypotheses")
+        if isinstance(gh, dict):
+            extracted = None
+            for key in ("hypotheses", "items", "results", "generated_hypotheses"):
+                if key in gh and isinstance(gh[key], list):
+                    extracted = gh[key]
+                    break
+            d["generated_hypotheses"] = extracted if extracted is not None else []
+
         return d
 
 

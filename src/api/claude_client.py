@@ -22,6 +22,13 @@ from typing import Any
 import anthropic
 from anthropic import APIError, APIStatusError, RateLimitError
 
+# OverloadedError isn't always re-exported at the top level depending on SDK version.
+# Resolve it dynamically so the import doesn't break older/newer SDK versions.
+try:
+    from anthropic import OverloadedError  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover
+    OverloadedError = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # Beta header strings for the SDK's `betas=` parameter.
@@ -148,20 +155,23 @@ class ClaudeClient:
                 )
                 time.sleep(delay)
                 delay = min(delay * 2, 30.0)
-            except APIStatusError as e:
-                # 5xx is transient — back off and retry. 4xx is not.
-                if 500 <= e.status_code < 600 and attempt < 3:
+            except Exception as e:  # broaden catch to also cover OverloadedError, APIStatusError
+                # OverloadedError (Anthropic infra overload) and any 5xx APIStatusError
+                # are transient — back off and retry up to 5 attempts.
+                is_overloaded = OverloadedError is not None and isinstance(e, OverloadedError)
+                is_5xx = isinstance(e, APIStatusError) and 500 <= e.status_code < 600
+                if (is_overloaded or is_5xx) and attempt < 5:
+                    label = "OverloadedError" if is_overloaded else f"transient {getattr(e, 'status_code', '5xx')}"
                     logger.warning(
-                        "Transient %d on attempt %d; sleeping %.1fs",
-                        e.status_code,
+                        "%s on attempt %d/5; sleeping %.1fs",
+                        label,
                         attempt,
                         delay,
                     )
                     time.sleep(delay)
                     delay = min(delay * 2, 30.0)
                     continue
-                raise
-            except APIError:
+                # Anything else: not retryable here, propagate
                 raise
 
     # ---------- Response unpacking ----------

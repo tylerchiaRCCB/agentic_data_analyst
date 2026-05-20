@@ -38,10 +38,12 @@ cost_per_million:
     cache_read: 0.30
     cache_write: 3.75
 
-# Maximum tokens per agent response. Most agents emit a single JSON object; 8K
-# is a comfortable ceiling. Increase per-agent in code if a specific agent
-# (Communication Agent rendering many cards) needs more headroom.
-max_tokens_per_call: 8192
+# Maximum tokens per agent response. Bumped from 8192 to 16384 after
+# relationship-analyzer twice exhausted its output budget mid-JSON
+# (its output is the most token-heavy: multiple correlation tables, group
+# comparisons, effect sizes, all per variable-pair). 16K gives headroom
+# without being wasteful — most agents will use a fraction of it.
+max_tokens_per_call: 16384
 
 # Number of retries per logical failure (schema validation, lineage gap, etc.).
 # Per failure-recovery.md §1: one retry is the default. Distinguishes transient
