@@ -10,6 +10,7 @@ match types. This is the balance the design doc specifies.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -159,10 +160,48 @@ class Hypothesis(StrictModel):
 class Finding(StrictModel):
     id: str
     claim: str
-    evidence_statistic_ids: list[str]
+    evidence_statistic_ids: list[str] = Field(default_factory=list)
     caveats: list[Caveat] = Field(default_factory=list)
-    producing_agent: AgentName
+    producing_agent: AgentName | None = None
     related_hypothesis_ids: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_finding(cls, data: Any) -> Any:
+        """Accept variant field names agents use in practice:
+        - `id` aliased as outlier_id, finding_id, cluster_id, anomaly_id, pattern_id
+        - `claim` aliased as description, statement, headline, finding, summary
+        - `evidence_statistic_ids` aliased as statistic_ids, evidence_ids, supporting_statistics
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        if "id" not in d:
+            for alt in ("outlier_id", "finding_id", "cluster_id", "anomaly_id", "pattern_id"):
+                if alt in d:
+                    d["id"] = str(d.pop(alt))
+                    break
+            else:
+                # Last-resort fallback — synthesize an id so the finding can survive
+                d["id"] = "auto-" + str(abs(hash(json.dumps(d, sort_keys=True, default=str))))[:10]
+
+        if "claim" not in d:
+            for alt in ("description", "statement", "headline", "finding", "summary"):
+                if alt in d:
+                    d["claim"] = str(d.pop(alt))
+                    break
+            else:
+                d["claim"] = "(no claim text provided)"
+
+        if "evidence_statistic_ids" not in d:
+            for alt in ("statistic_ids", "evidence_ids", "supporting_statistics"):
+                if alt in d:
+                    val = d.pop(alt)
+                    d["evidence_statistic_ids"] = val if isinstance(val, list) else [str(val)]
+                    break
+
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +411,15 @@ class DataRetrievalPayload(StrictModel):
 
 class DataProfilerPayload(StrictModel):
     readiness_assessment: ReadinessAssessment
-    completeness: dict[str, dict[str, float | int]]
+    # Inner value types are deliberately Any — agents may include None for
+    # "no value to report" (e.g., null concentration when there are no nulls)
+    # or richer structures (e.g., a "concentration" object listing where nulls cluster).
+    completeness: dict[str, dict[str, Any]]
     freshness: dict[str, Any]
     grain: dict[str, Any]
     distributions: dict[str, dict[str, Any]]
-    baselines: list[dict[str, str]] = Field(default_factory=list)
+    # baselines: agents commonly include numeric statistic refs, not just strings.
+    baselines: list[dict[str, Any]] = Field(default_factory=list)
     quality_issues: list[Caveat] = Field(default_factory=list)
     data_integrity_risks: list[dict[str, Any]] = Field(default_factory=list)
     mandatory_caveats: list[Caveat] = Field(default_factory=list)
