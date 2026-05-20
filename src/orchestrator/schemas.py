@@ -313,6 +313,28 @@ class QuestionFramerPayload(StrictModel):
                     normalized.append(stage)
             d["pipeline_composition"] = normalized
 
+        # input_mode: coerce variants to canonical 'interactive' or 'proactive'
+        im = d.get("input_mode")
+        if isinstance(im, str) and im not in {"interactive", "proactive"}:
+            lower = im.lower()
+            if "schedul" in lower or "proactive" in lower or "monitor" in lower or "cron" in lower:
+                d["input_mode"] = "proactive"
+            else:
+                d["input_mode"] = "interactive"
+
+        # investigation_mode: coerce variants
+        invm = d.get("investigation_mode")
+        if isinstance(invm, str) and invm not in {"diagnostic", "prescriptive", "both", "none"}:
+            lower = invm.lower()
+            if "diagnostic" in lower and "prescriptive" in lower:
+                d["investigation_mode"] = "both"
+            elif "diagnostic" in lower or "diagnos" in lower:
+                d["investigation_mode"] = "diagnostic"
+            elif "prescriptive" in lower or "opportun" in lower:
+                d["investigation_mode"] = "prescriptive"
+            else:
+                d["investigation_mode"] = "none"
+
         # output_mode: coerce model-invented hybrids to one of the three canonical modes.
         # Anything mentioning "action" maps to action-card (which already supports
         # mixed cards + descriptive-summary output). Anything mentioning "narrative"
