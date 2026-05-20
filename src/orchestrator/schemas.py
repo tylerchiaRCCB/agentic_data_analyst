@@ -616,10 +616,30 @@ class RelationshipAnalyzerPayload(StrictModel):
     significant_correlations: list[Finding] = Field(default_factory=list)
     group_differences: list[Finding] = Field(default_factory=list)
     interaction_effects: list[Finding] = Field(default_factory=list)
-    multiple_comparison_correction: dict[str, Any]
+    multiple_comparison_correction: dict[str, Any] = Field(default_factory=dict)
     notable_findings: list[Finding] = Field(default_factory=list)
     statistics: list[Statistic] = Field(default_factory=list)
     caveats: list[Caveat] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_relationship_analyzer(cls, data: Any) -> Any:
+        """If multiple_comparison_correction came as a descriptive string, wrap it."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        mcc = d.get("multiple_comparison_correction")
+        if isinstance(mcc, str):
+            lower = mcc.lower()
+            method = "benjamini_hochberg" if "benjamini" in lower or "bh" in lower or "fdr" in lower else (
+                "bonferroni" if "bonferroni" in lower else "unspecified"
+            )
+            d["multiple_comparison_correction"] = {
+                "applied": True,
+                "method": method,
+                "rationale": mcc,
+            }
+        return d
 
 
 class PatternDiscovererPayload(StrictModel):
@@ -816,10 +836,19 @@ class CommunicationAgentPayload(StrictModel):
     @classmethod
     def _normalize_comms_output_mode(cls, data: Any) -> Any:
         """Coerce hybrid output_mode strings (e.g. 'action-card+descriptive-summary')
-        to one of the three canonical modes — same rule used on the framer."""
+        to one of the three canonical modes — same rule used on the framer.
+        Also pull output_mode from run_metadata.output_mode if it's nested there."""
         if not isinstance(data, dict):
             return data
         d = dict(data)
+
+        # If output_mode is missing at the top level, check run_metadata for it
+        if "output_mode" not in d:
+            rm = d.get("run_metadata") or d.get("metadata") or {}
+            if isinstance(rm, dict) and "output_mode" in rm:
+                d["output_mode"] = rm["output_mode"]
+
+        # Coerce hybrid / non-canonical modes
         om = d.get("output_mode")
         if isinstance(om, str) and om not in {"narrative", "action-card", "descriptive-summary"}:
             lower = om.lower()
@@ -829,6 +858,19 @@ class CommunicationAgentPayload(StrictModel):
                 d["output_mode"] = "narrative"
             else:
                 d["output_mode"] = "descriptive-summary"
+        elif om is None:
+            # If still no output_mode and there are action_cards in the payload, default to action-card
+            if d.get("action_cards"):
+                d["output_mode"] = "action-card"
+            elif d.get("descriptive_summary"):
+                d["output_mode"] = "descriptive-summary"
+            else:
+                d["output_mode"] = "descriptive-summary"
+
+        # Also ensure rendered_output_markdown exists — default to empty string if missing
+        if "rendered_output_markdown" not in d:
+            d["rendered_output_markdown"] = ""
+
         return d
 
 
