@@ -815,11 +815,30 @@ class ActionCard(StrictModel):
         if "owner_role" not in d and "owner" in d:
             d["owner_role"] = str(d.pop("owner"))
 
-        # source_finding_id <- source / finding_id
+        # source_finding_id <- source / finding_id / first finding in finding_ids
         if "source_finding_id" not in d:
             for alt in ("source", "finding_id", "source_finding"):
                 if alt in d:
                     d["source_finding_id"] = str(d.pop(alt))
+                    break
+            else:
+                # finding_ids: list of upstream finding refs — take the first as the source
+                fids = d.get("finding_ids")
+                if isinstance(fids, list) and fids:
+                    d["source_finding_id"] = str(fids[0])
+
+        # confidence <- grade / validator_grade
+        if "confidence" not in d:
+            for alt in ("grade", "validator_grade"):
+                if alt in d:
+                    d["confidence"] = d[alt]  # leave original in place too — Literal will validate
+                    break
+
+        # why_it_matters <- why_this_matters / business_impact / impact_summary
+        if "why_it_matters" not in d:
+            for alt in ("why_this_matters", "business_impact", "impact_summary"):
+                if alt in d:
+                    d["why_it_matters"] = str(d.pop(alt))
                     break
 
         # caveats: coerce strings to Caveat objects
