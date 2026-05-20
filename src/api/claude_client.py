@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
-from anthropic import APIError, APIStatusError, RateLimitError
+from anthropic import APIConnectionError, APIError, APIStatusError, APITimeoutError, RateLimitError
 
 # OverloadedError isn't always re-exported at the top level depending on SDK version.
 # Resolve it dynamically so the import doesn't break older/newer SDK versions.
@@ -155,13 +155,21 @@ class ClaudeClient:
                 )
                 time.sleep(delay)
                 delay = min(delay * 2, 30.0)
-            except Exception as e:  # broaden catch to also cover OverloadedError, APIStatusError
-                # OverloadedError (Anthropic infra overload) and any 5xx APIStatusError
-                # are transient — back off and retry up to 5 attempts.
+            except Exception as e:  # broaden catch to cover transient errors
+                # Transient categories — retry up to 5 attempts with exponential backoff:
+                #  - OverloadedError (Anthropic infra overload)
+                #  - APIStatusError with 5xx status code
+                #  - APIConnectionError / APITimeoutError (network blips, dropped SSL)
                 is_overloaded = OverloadedError is not None and isinstance(e, OverloadedError)
                 is_5xx = isinstance(e, APIStatusError) and 500 <= e.status_code < 600
-                if (is_overloaded or is_5xx) and attempt < 5:
-                    label = "OverloadedError" if is_overloaded else f"transient {getattr(e, 'status_code', '5xx')}"
+                is_conn = isinstance(e, (APIConnectionError, APITimeoutError))
+                if (is_overloaded or is_5xx or is_conn) and attempt < 5:
+                    if is_overloaded:
+                        label = "OverloadedError"
+                    elif is_conn:
+                        label = f"connection error ({type(e).__name__})"
+                    else:
+                        label = f"transient {getattr(e, 'status_code', '5xx')}"
                     logger.warning(
                         "%s on attempt %d/5; sleeping %.1fs",
                         label,
