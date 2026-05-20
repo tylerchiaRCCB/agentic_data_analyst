@@ -497,7 +497,30 @@ class FindingsValidatorPayload(StrictModel):
     findings_review: list[ReviewedFinding] = Field(default_factory=list)
     cross_cutting_issues: list[dict[str, Any]] = Field(default_factory=list)
     guardrail_check_results: list[dict[str, Any]] = Field(default_factory=list)
-    revalidation_summary: dict[str, Any]
+    revalidation_summary: dict[str, Any] = Field(default_factory=dict)
+    # Optional richer form the model often produces alongside the string assessment
+    assessment_details: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_validator(cls, data: Any) -> Any:
+        """The validator often produces a rich object for overall_assessment
+        (with findings_by_grade, summary, etc). Coerce to string while preserving
+        the rich form in `assessment_details`."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        oa = d.get("overall_assessment")
+        if isinstance(oa, dict):
+            d["assessment_details"] = oa
+            # Prefer an explicit "summary" or "assessment" field if present
+            summary = oa.get("summary") or oa.get("assessment") or oa.get("overall")
+            if summary:
+                d["overall_assessment"] = str(summary)
+            else:
+                # Stringify the dict
+                d["overall_assessment"] = json.dumps(oa, default=str)
+        return d
 
 
 class ActionCard(StrictModel):
@@ -510,7 +533,39 @@ class ActionCard(StrictModel):
     due: str
     follow_up_trigger: str
     caveats: list[Caveat] = Field(default_factory=list)
-    source_finding_id: str
+    source_finding_id: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_action_card(cls, data: Any) -> Any:
+        """Accept variant field names + coerce string caveats to Caveat objects."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        # owner_role <- owner
+        if "owner_role" not in d and "owner" in d:
+            d["owner_role"] = str(d.pop("owner"))
+
+        # source_finding_id <- source / finding_id
+        if "source_finding_id" not in d:
+            for alt in ("source", "finding_id", "source_finding"):
+                if alt in d:
+                    d["source_finding_id"] = str(d.pop(alt))
+                    break
+
+        # caveats: coerce strings to Caveat objects
+        cv = d.get("caveats")
+        if isinstance(cv, list):
+            normalized = []
+            for item in cv:
+                if isinstance(item, str):
+                    normalized.append({"text": item, "severity": "medium", "reason": ""})
+                else:
+                    normalized.append(item)
+            d["caveats"] = normalized
+
+        return d
 
 
 class CommunicationAgentPayload(StrictModel):
@@ -521,6 +576,25 @@ class CommunicationAgentPayload(StrictModel):
     carried_caveats: list[Caveat] = Field(default_factory=list)
     follow_up_suggestions: list[str] = Field(default_factory=list)
     visualization_recommendations: list[dict[str, Any]] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_comms_output_mode(cls, data: Any) -> Any:
+        """Coerce hybrid output_mode strings (e.g. 'action-card+descriptive-summary')
+        to one of the three canonical modes — same rule used on the framer."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        om = d.get("output_mode")
+        if isinstance(om, str) and om not in {"narrative", "action-card", "descriptive-summary"}:
+            lower = om.lower()
+            if "action" in lower or "card" in lower:
+                d["output_mode"] = "action-card"
+            elif "narrative" in lower:
+                d["output_mode"] = "narrative"
+            else:
+                d["output_mode"] = "descriptive-summary"
+        return d
 
 
 # ---------------------------------------------------------------------------
