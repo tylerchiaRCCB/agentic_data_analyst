@@ -24,6 +24,11 @@ from anthropic import APIError, APIStatusError, RateLimitError
 
 logger = logging.getLogger(__name__)
 
+# Beta header strings for the SDK's `betas=` parameter.
+# Both must be passed together when running code execution against an uploaded file.
+BETA_FILES_API = "files-api-2025-04-14"
+BETA_CODE_EXECUTION = "code-execution-2025-05-22"
+
 # Tool definition for Anthropic-hosted code execution. The version constant
 # may need updating as Anthropic ships new tool revisions.
 CODE_EXECUTION_TOOL: dict[str, str] = {
@@ -66,9 +71,16 @@ class ClaudeClient:
 
         Used at run start by pipeline_executor.py — every agent's code execution
         references the file_id rather than re-uploading.
+
+        Requires the `files-api-2025-04-14` beta. The SDK passes that via the
+        `betas=` parameter (not as a query string).
         """
+        mime = "text/csv" if path.suffix.lower() == ".csv" else "application/vnd.ms-excel"
         with path.open("rb") as f:
-            result = self._client.beta.files.upload(file=(path.name, f, "text/csv"))
+            result = self._client.beta.files.upload(
+                file=(path.name, f, mime),
+                betas=[BETA_FILES_API],
+            )
         return result.id
 
     # ---------- Main call path ----------
@@ -81,13 +93,19 @@ class ClaudeClient:
         messages: list[dict[str, Any]],
         max_tokens: int = 8192,
         enable_code_execution: bool = True,
+        enable_files_api: bool = True,
         extra_tools: list[dict[str, Any]] | None = None,
+        timeout_seconds: float = 600.0,
     ) -> ClaudeResponse:
         """Call Claude with the given system prompt and messages.
 
         `system` may be a plain string OR a list of structured content blocks. The list
         form enables prompt caching via `{"type": "text", "text": "...",
         "cache_control": {"type": "ephemeral"}}` blocks — see prompt_assembler.py.
+
+        When `enable_files_api=True`, the call passes through `container_upload` blocks
+        in the user message so code execution can read uploaded files via
+        $INPUT_DIR/<filename> in the sandbox.
 
         Handles rate-limit retries with exponential backoff per failure-recovery.md §4.2.
         Other errors propagate; the caller decides how to handle.
@@ -98,23 +116,25 @@ class ClaudeClient:
         if extra_tools:
             tools.extend(extra_tools)
 
+        betas: list[str] = []
+        if enable_code_execution:
+            betas.append(BETA_CODE_EXECUTION)
+        if enable_files_api:
+            betas.append(BETA_FILES_API)
+
         attempt = 0
         delay = 2.0
         while True:
             attempt += 1
             try:
-                response = self._client.messages.create(
+                response = self._client.beta.messages.create(
                     model=model,
                     system=system,
                     messages=messages,
                     max_tokens=max_tokens,
                     tools=tools if tools else anthropic.NOT_GIVEN,
-                    # Beta header required for code execution as of writing
-                    extra_headers=(
-                        {"anthropic-beta": "code-execution-2025-05-22"}
-                        if enable_code_execution
-                        else {}
-                    ),
+                    betas=betas if betas else anthropic.NOT_GIVEN,
+                    timeout=timeout_seconds,
                 )
                 return self._wrap_response(response)
             except RateLimitError:

@@ -213,6 +213,12 @@ class PipelineExecutor:
         upstream_artifacts: dict[str, dict[str, Any]] | None = None,
         dataset_file_id: str | None = None,
     ) -> StageResult:
+        self.run_logger.info(
+            f"Stage starting: {agent}",
+            stage_index=stage_index,
+            skills=skills,
+        )
+        t0 = time.perf_counter()
         with self.tracer.span(f"stage.{agent}", stage_index=stage_index) as span:
             prompt = assemble_prompt(agent_name=agent, skills=skills, domain=self.domain)
             span.attributes["skills_loaded"] = prompt.sections_loaded
@@ -232,6 +238,13 @@ class PipelineExecutor:
                     prompt=prompt,
                     user_message=user_message_text,
                 )
+                stage_duration_ms = int((time.perf_counter() - t0) * 1000)
+                self.run_logger.info(
+                    f"Stage done: {agent}",
+                    stage_index=stage_index,
+                    duration_ms=stage_duration_ms,
+                    status=artifact.get("status", "ok"),
+                )
                 return StageResult(
                     stage_index=stage_index,
                     agent=agent,
@@ -241,13 +254,20 @@ class PipelineExecutor:
                     skill_paths_loaded=prompt.sections_loaded,
                 )
             except Exception as e:
+                stage_duration_ms = int((time.perf_counter() - t0) * 1000)
+                self.run_logger.error(
+                    f"Stage failed: {agent}",
+                    stage_index=stage_index,
+                    duration_ms=stage_duration_ms,
+                    error=f"{type(e).__name__}: {e}",
+                )
                 logger.exception("Stage %s failed", agent)
                 return StageResult(
                     stage_index=stage_index,
                     agent=agent,
                     artifact={},
                     status="failed",
-                    duration_ms=0,
+                    duration_ms=stage_duration_ms,
                     error=f"{type(e).__name__}: {e}",
                 )
 
@@ -259,7 +279,7 @@ class PipelineExecutor:
         agent: AgentName,
         stage_index: int,
         prompt: AssembledPrompt,
-        user_message: str,
+        user_message: list[dict[str, Any]],
     ) -> dict[str, Any]:
         model = self.config.model_per_agent.get(agent)
         if not model:
@@ -267,10 +287,14 @@ class PipelineExecutor:
 
         attempt = 0
         last_error: str | None = None
-        clarification = ""
+        clarification: dict[str, Any] | None = None
         while attempt <= self.config.max_retries_per_stage:
             attempt += 1
-            messages = [{"role": "user", "content": user_message + clarification}]
+            # On retry: append the clarification block to the original user content
+            content_blocks = list(user_message)
+            if clarification is not None:
+                content_blocks.append(clarification)
+            messages = [{"role": "user", "content": content_blocks}]
             t0 = time.perf_counter()
             response: ClaudeResponse = self.client.call(
                 model=model,
@@ -294,14 +318,14 @@ class PipelineExecutor:
             parsed = self._extract_json_payload(response.text)
             if parsed is None:
                 last_error = "No JSON payload found in agent response"
-                clarification = self._clarification_for(agent, last_error)
+                clarification = {"type": "text", "text": self._clarification_for(agent, last_error)}
                 continue
 
             try:
                 validate_payload(agent, parsed)
             except ValidationError as e:
                 last_error = f"Schema validation failed: {e.errors()[:3]}"
-                clarification = self._clarification_for(agent, last_error)
+                clarification = {"type": "text", "text": self._clarification_for(agent, last_error)}
                 continue
 
             artifact = {
@@ -419,7 +443,7 @@ class PipelineExecutor:
         user_question: str,
         proactive_prompt: str | None,
         data_summary: dict[str, Any] | None,
-    ) -> str:
+    ) -> list[dict[str, Any]]:
         parts: list[str] = []
         if proactive_prompt:
             parts.append(f"# Scheduled prompt\n{proactive_prompt}")
@@ -435,7 +459,7 @@ class PipelineExecutor:
             "Follow the schema from your role. No prose outside the JSON. Use the "
             "code execution tool only if you need to compute something to verify a premise."
         )
-        return "\n\n".join(parts)
+        return [{"type": "text", "text": "\n\n".join(parts)}]
 
     def _build_user_message(
         self,
@@ -443,25 +467,41 @@ class PipelineExecutor:
         agent: str,
         upstream_artifacts: dict[str, dict[str, Any]] | None = None,
         dataset_file_id: str | None = None,
-    ) -> str:
+    ) -> list[dict[str, Any]]:
         """For non-framer stages, the orchestrator gives the agent the upstream artifacts
         (computed summaries — not raw rows) and an instruction to produce its own typed
         payload.
+
+        Returns a list of content blocks suitable for the messages API's
+        `content` field. When `dataset_file_id` is set, prepends a `container_upload`
+        block so the file is mounted in the code-execution sandbox at $INPUT_DIR.
         """
+        blocks: list[dict[str, Any]] = []
+
+        # Mount the uploaded file into the sandbox via container_upload block
+        if dataset_file_id:
+            blocks.append({"type": "container_upload", "file_id": dataset_file_id})
+
         parts: list[str] = [
             f"# Stage role\nYou are running as the **{agent}** agent."
         ]
         if dataset_file_id:
             parts.append(
-                f"# Dataset access\nThe dataset is available in the code execution sandbox "
-                f"via Anthropic Files API as file_id `{dataset_file_id}`. Load it with "
-                f"`import pandas as pd; df = pd.read_csv(f'/mnt/user-data/{dataset_file_id}')` "
-                f"or analogous. NEVER print or return raw rows; emit summaries only "
+                "# Dataset access\n"
+                "The dataset is mounted in the code-execution sandbox. Locate it via the "
+                "`INPUT_DIR` environment variable — files appear at "
+                "`$INPUT_DIR/<original-filename>`. Example:\n"
+                "```python\n"
+                "import os, pandas as pd\n"
+                "input_dir = os.environ['INPUT_DIR']\n"
+                "files = os.listdir(input_dir)\n"
+                "df = pd.read_csv(os.path.join(input_dir, files[0]))\n"
+                "```\n"
+                "NEVER print or return raw rows; emit summaries only "
                 "(per pipeline-definitions.md §10)."
             )
         if upstream_artifacts:
             parts.append("# Upstream artifacts (computed summaries — NOT raw rows)")
-            # We only include the payloads, since the envelope metadata is noise here.
             payloads = {
                 name: art.get("payload", {}) for name, art in upstream_artifacts.items()
             }
@@ -471,4 +511,6 @@ class PipelineExecutor:
             "specified in your role. No prose outside the JSON. Use the code_execution "
             "tool for every numeric claim."
         )
-        return "\n\n".join(parts)
+
+        blocks.append({"type": "text", "text": "\n\n".join(parts)})
+        return blocks
