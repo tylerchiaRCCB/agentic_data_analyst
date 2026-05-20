@@ -317,6 +317,58 @@ class DataRetrievalPayload(StrictModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_data_retrieval(cls, data: Any) -> Any:
+        """Coerce common shapes agents emit:
+
+        - `schema: ["account_id", "region", ...]` → list of ColumnSpec with defaults
+          (dtype="string", nullable=True). Real type info usually lives in
+          `column_metadata`; the schema field gets used as a shorthand.
+        - `column_metadata: [{name, dtype, null_count, distinct_count, ...}]` —
+          ensure `is_free_text` defaults to False if omitted.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        # Normalize schema: bare strings → ColumnSpec dicts
+        sch = d.get("schema") or d.get("schema_columns")
+        if isinstance(sch, list):
+            normalized = []
+            for item in sch:
+                if isinstance(item, str):
+                    normalized.append({"name": item, "dtype": "string", "nullable": True})
+                elif isinstance(item, dict):
+                    # Ensure required fields exist
+                    item = {**item}
+                    item.setdefault("dtype", "string")
+                    item.setdefault("nullable", True)
+                    normalized.append(item)
+                else:
+                    normalized.append(item)
+            # Always normalize back into the alias the model expects
+            d["schema"] = normalized
+            d.pop("schema_columns", None)
+
+        # Normalize column_metadata: ensure is_free_text defaults to False
+        cm = d.get("column_metadata")
+        if isinstance(cm, list):
+            normalized_cm = []
+            for item in cm:
+                if isinstance(item, dict):
+                    item = {**item}
+                    item.setdefault("is_free_text", False)
+                    item.setdefault("null_count", 0)
+                    item.setdefault("distinct_count", 0)
+                    item.setdefault("dtype", "string")
+                    normalized_cm.append(item)
+                else:
+                    normalized_cm.append(item)
+            d["column_metadata"] = normalized_cm
+
+        return d
+
 
 class DataProfilerPayload(StrictModel):
     readiness_assessment: ReadinessAssessment
