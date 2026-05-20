@@ -178,9 +178,78 @@ class Caveat(StrictModel):
 class Hypothesis(StrictModel):
     id: str
     statement: str
-    prior_strength: Literal["weak", "moderate", "strong"]
-    testable_via: str
-    rationale: str
+    prior_strength: Literal["weak", "moderate", "strong"] = "moderate"
+    testable_via: str = ""
+    rationale: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_hypothesis(cls, data: Any) -> Any:
+        """Accept common variant field names and fill defaults for missing fields.
+
+        Real outputs use: title/hypothesis/H/description for statement;
+        prior/confidence/strength for prior_strength; method/test/approach
+        for testable_via; reasoning/justification for rationale.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        # id from variants
+        if "id" not in d:
+            for alt in ("hypothesis_id", "h_id"):
+                if alt in d:
+                    d["id"] = str(d.pop(alt))
+                    break
+            else:
+                d["id"] = "auto-" + str(abs(hash(json.dumps(d, sort_keys=True, default=str))))[:10]
+
+        # statement from variants
+        if "statement" not in d:
+            for alt in ("title", "hypothesis", "description", "headline", "claim"):
+                if alt in d:
+                    d["statement"] = str(d.pop(alt))
+                    break
+            else:
+                d["statement"] = "(no statement provided)"
+
+        # prior_strength — coerce variants to canonical Literal
+        ps = d.get("prior_strength")
+        if ps is None:
+            for alt in ("prior", "confidence", "strength", "prior_confidence"):
+                if alt in d:
+                    ps = d.pop(alt)
+                    break
+        if isinstance(ps, str):
+            lower = ps.lower()
+            if "strong" in lower or "high" in lower:
+                d["prior_strength"] = "strong"
+            elif "weak" in lower or "low" in lower:
+                d["prior_strength"] = "weak"
+            else:
+                d["prior_strength"] = "moderate"
+        elif ps is None:
+            d["prior_strength"] = "moderate"
+
+        # testable_via
+        if "testable_via" not in d:
+            for alt in ("method", "test", "approach", "test_method", "via"):
+                if alt in d:
+                    d["testable_via"] = str(d.pop(alt))
+                    break
+            else:
+                d["testable_via"] = ""
+
+        # rationale
+        if "rationale" not in d:
+            for alt in ("reasoning", "justification", "rationale_text", "explanation"):
+                if alt in d:
+                    d["rationale"] = str(d.pop(alt))
+                    break
+            else:
+                d["rationale"] = ""
+
+        return d
 
 
 class Finding(StrictModel):
