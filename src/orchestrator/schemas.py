@@ -580,6 +580,36 @@ class DataProfilerPayload(StrictModel):
     notable_observations: list[str] = Field(default_factory=list)
     statistics: list[Statistic] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_profiler(cls, data: Any) -> Any:
+        """Coerce list-of-objects shapes back to dicts keyed by column/metric name.
+
+        Agents commonly return completeness and distributions as a list of dicts
+        rather than the canonical dict keyed by name. Each item has `column` /
+        `metric` / `name` as its key — extract it and rebuild the canonical dict.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+
+        for field in ("completeness", "distributions"):
+            val = d.get(field)
+            if isinstance(val, list):
+                as_dict: dict[str, Any] = {}
+                for item in val:
+                    if isinstance(item, dict):
+                        key = item.get("column") or item.get("metric") or item.get("name")
+                        if key:
+                            as_dict[str(key)] = {
+                                k: v for k, v in item.items()
+                                if k not in {"metric", "column", "name"}
+                            }
+                if as_dict:
+                    d[field] = as_dict
+
+        return d
+
 
 class RelationshipAnalyzerPayload(StrictModel):
     relationships_examined: list[dict[str, Any]] = Field(default_factory=list)
