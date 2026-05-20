@@ -292,19 +292,30 @@ class QuestionFramerPayload(StrictModel):
             elif sd is not None:
                 d["success_criteria"] = str(sd)
 
-        # token_budget: accept int, dict {total, per_stage}, or numeric string
+        # token_budget: accept int, dict {total, per_stage}, or numeric string.
+        # Non-numeric values (e.g. "L4-default") gracefully default to 0.
+        def _to_int(x: Any) -> int:
+            try:
+                return int(x)
+            except (ValueError, TypeError):
+                return 0
+
         tb = d.get("token_budget")
         if isinstance(tb, dict):
             total = tb.get("total")
-            if total is None:
+            if isinstance(total, (int, float)):
+                d["token_budget"] = int(total)
+            elif total is None or isinstance(total, str):
+                # No numeric total — sum per_stage if present, else 0
                 per_stage = tb.get("per_stage") or {}
-                total = sum(v for v in per_stage.values() if isinstance(v, (int, float)))
-            d["token_budget"] = int(total or 0)
-        elif isinstance(tb, str):
-            try:
-                d["token_budget"] = int(tb)
-            except ValueError:
+                summed = sum(v for v in per_stage.values() if isinstance(v, (int, float)))
+                d["token_budget"] = int(summed)
+            else:
                 d["token_budget"] = 0
+        elif isinstance(tb, str):
+            d["token_budget"] = _to_int(tb)
+        elif tb is None:
+            d["token_budget"] = 0
 
         # pipeline_composition: coerce bare strings -> single stages, bare lists -> parallel groups
         # Also normalize any non-canonical agent names (e.g., "data-profiler-agent" -> "data-profiler").
