@@ -428,6 +428,30 @@ class DataRetrievalPayload(StrictModel):
                     normalized_cm.append(item)
             d["column_metadata"] = normalized_cm
 
+        # Normalize distributions: list-of-objects with `metric` key -> dict keyed by metric
+        dists = d.get("distributions")
+        if isinstance(dists, list):
+            as_dict: dict[str, Any] = {}
+            for item in dists:
+                if isinstance(item, dict):
+                    key = item.get("metric") or item.get("column") or item.get("name")
+                    if key:
+                        as_dict[str(key)] = {k: v for k, v in item.items() if k not in {"metric", "column", "name"}}
+            if as_dict:
+                d["distributions"] = as_dict
+
+        # Same for completeness: occasionally arrives as a list
+        comp = d.get("completeness")
+        if isinstance(comp, list):
+            as_dict = {}
+            for item in comp:
+                if isinstance(item, dict):
+                    key = item.get("column") or item.get("metric") or item.get("name")
+                    if key:
+                        as_dict[str(key)] = {k: v for k, v in item.items() if k not in {"metric", "column", "name"}}
+            if as_dict:
+                d["completeness"] = as_dict
+
         return d
 
 
