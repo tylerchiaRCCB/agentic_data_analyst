@@ -495,6 +495,33 @@ class PatternDiscovererPayload(StrictModel):
     caveats: list[Caveat] = Field(default_factory=list)
     statistics: list[Statistic] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_pattern_discoverer(cls, data: Any) -> Any:
+        """Map verbose technique descriptions to the canonical Literal values."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        techs = d.get("techniques_applied")
+        if isinstance(techs, list):
+            normalized: list[str] = []
+            for t in techs:
+                if not isinstance(t, str):
+                    continue
+                lower = t.lower()
+                if "cluster" in lower or "kmeans" in lower or "k-means" in lower or "dbscan" in lower or "hierarchical" in lower:
+                    canonical = "clustering"
+                elif "dimensionality" in lower or "pca" in lower or "umap" in lower or "tsne" in lower or "t-sne" in lower:
+                    canonical = "dimensionality_reduction"
+                elif "outlier" in lower or "isolation" in lower or "mahalanobis" in lower or "anomaly" in lower:
+                    canonical = "outlier_characterization"
+                else:
+                    continue
+                if canonical not in normalized:
+                    normalized.append(canonical)
+            d["techniques_applied"] = normalized
+        return d
+
 
 class TimeSeriesAnalyzerPayload(StrictModel):
     decomposition: dict[str, Any] | None = None

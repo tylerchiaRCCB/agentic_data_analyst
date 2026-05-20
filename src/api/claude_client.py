@@ -95,7 +95,7 @@ class ClaudeClient:
         enable_code_execution: bool = True,
         enable_files_api: bool = True,
         extra_tools: list[dict[str, Any]] | None = None,
-        timeout_seconds: float = 600.0,
+        timeout_seconds: float = 900.0,
     ) -> ClaudeResponse:
         """Call Claude with the given system prompt and messages.
 
