@@ -245,6 +245,40 @@ centralized logging platform.
 
 ## Demo and presentation
 
+### Visualization rendering (output contains real charts, not just chart recommendations)
+Today the Communication Agent emits a *`VISUALIZATION SUGGESTED:`* prose line per
+finding. The actual chart is the downstream user's / BI team's job. Recipients
+read text reports without visuals.
+
+Three implementation paths, in increasing effort:
+
+- **Mermaid diagrams inline (~3 hours).** Update the Communication Agent's
+  output instructions to emit a fenced `mermaid` block alongside each finding's
+  text. GitHub / Obsidian / Notion / Typora render Mermaid natively.
+  Limited chart types (line, bar, gantt, pie) and limited customization.
+  Lowest risk; visible improvement immediately.
+
+- **Matplotlib in sandbox → embed PNGs (~1 day) — RECOMMENDED for MVP demo
+  polish.** Agents already run code execution; add a `plt.savefig()` step
+  during the relevant agent's run; orchestrator downloads the file via the
+  Anthropic Files API and inlines `![chart-name](runs/<run_id>/figures/X.png)`
+  references in the rendered markdown. Produces real, professional-looking
+  charts; works in any markdown viewer + PDF + GitHub render. Requires Files
+  API download method (we currently only have upload).
+
+- **Vega-Lite JSON specs (~1 day).** Agents emit JSON chart specs in the
+  artifact (alongside data). The Communication Agent embeds the specs in the
+  markdown. A downstream renderer (or a tiny webapp / dashboard) interprets
+  them. Most production-grade for a webapp delivery channel. Less immediately
+  useful for the static-markdown phase.
+
+- **Why it matters:** Recipients absorb charts faster than text. The Validator's
+  caveat in run #11 — *"the corrected CI is [−0.0112, −0.0038], which includes
+  zero"* — is more compelling next to a bar chart with the CI rendered visually.
+- **Effort:** see options above.
+- **Trigger:** Before CEO demo if polish matters most, OR when first
+  non-technical recipient pushes back on text-only output.
+
 ### Live demo runner with progressive console output
 The spec's Part 8 shows a desired demo console output. We have the logs
 already (run.log + stdout), but not yet the polished progressive console
