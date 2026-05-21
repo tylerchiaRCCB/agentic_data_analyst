@@ -155,6 +155,32 @@ Outputs:
   - `lineage.json` — every claim's provenance (source, slice, code reference, agent)
   - `<run_id>-failure.md` — operator-facing failure report (only on hard-fail)
 
+### Tools — partial-pipeline replay and context-gap extraction
+
+The pipeline saves typed artifacts for every stage under `runs/<run_id>/artifacts/`. Two tools operate on those artifacts and do **not** require running the full pipeline again.
+
+**Replay only the Communication Agent against an existing run.** Use when you want to iterate on output formatting / prompts without re-running the analytical stages (~$0.30 vs ~$10+ for a full run):
+
+```bash
+uv run python -m src.tools.replay_comms --run-id 20260520T223548Z-89dba6ec
+```
+
+Reads `runs/<run-id>/artifacts/00-question-framer.json` through the validator's artifact, calls only the Communication Agent, and writes:
+- `output/<run-id>-replay.md` — the rendered recipient markdown
+- `runs/<run-id>/artifacts/05-communication-agent-replay.json` — the replay artifact
+
+This is the right tool whenever the question is *"does the output look right?"* — you don't need to re-pay for the analytical pipeline to iterate on rendering.
+
+**Extract context gaps across one or many runs.** Pulls every caveat, data gap, integrity risk, and unanswered hypothesis the agents surfaced — useful for converting contextless test runs into a requirements list for the domain-context conversation with the business:
+
+```bash
+# Single run
+uv run python -m src.tools.extract_context_gaps --run-id 20260520T223548Z-89dba6ec
+
+# Aggregate across all runs in runs/
+uv run python -m src.tools.extract_context_gaps --aggregate
+```
+
 ### Running tests
 
 ```bash
