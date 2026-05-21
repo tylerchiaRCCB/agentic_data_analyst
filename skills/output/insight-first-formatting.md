@@ -5,6 +5,26 @@
 
 This skill is the pyramid principle applied to analytical output: lead with the conclusion, support with evidence, end with detail and methodology. The opposite — building from data to interpretation to conclusion — works in academic writing and fails in operational communication.
 
+## Report-level TL;DR — required at the top of any output with 2+ action cards
+
+Before any cards or descriptive summary, the rendered output MUST begin with a TL;DR section. Format:
+
+```markdown
+## TL;DR
+- **<Card 1 in one line — entity, metric, business consequence>** (Grade A)
+- **<Card 2 in one line>** (Grade B)
+- Network performance otherwise <stable / mixed / soft>.
+```
+
+Rules:
+- Maximum 5 bullets total. If more than 4 cards exist, group the lower-grade ones ("3 grade-C structural observations — see below").
+- Each bullet is **one line**. If a card needs more than one line to summarize, the card itself is too dense — tighten the card's headline first.
+- Confidence grade in parentheses at the end of each bullet.
+- The third bullet (or last bullet, if only 2 cards) summarizes the descriptive-summary state of the rest of the network in 5 words or fewer.
+- TL;DR is for executives who will read **only this section**. Make it count.
+
+A senior leader should be able to read the TL;DR, decide whether to read further, and route the relevant cards to direct reports — all in under 20 seconds.
+
 ## The pyramid for action cards
 
 The action card structure (see [proactive-action-card.md](proactive-action-card.md)) already enforces this order:

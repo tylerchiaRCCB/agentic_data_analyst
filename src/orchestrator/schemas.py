@@ -848,6 +848,24 @@ class ActionCard(StrictModel):
                     d["alert"] = str(d.pop(alt))
                     break
 
+        # follow_up_trigger: combine resolution + escalation variants if split
+        if "follow_up_trigger" not in d:
+            res = d.pop("follow_up_trigger_resolution", None)
+            esc = d.pop("follow_up_trigger_escalation", None)
+            parts = []
+            if res:
+                parts.append(f"Resolution: {res}")
+            if esc:
+                parts.append(f"Escalation: {esc}")
+            if parts:
+                d["follow_up_trigger"] = " ".join(parts)
+            else:
+                # Try other single-field aliases
+                for alt in ("follow_up", "next_check", "resolution_trigger"):
+                    if alt in d:
+                        d["follow_up_trigger"] = str(d.pop(alt))
+                        break
+
         # caveats: coerce strings to Caveat objects
         cv = d.get("caveats")
         if isinstance(cv, list):

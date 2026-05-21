@@ -11,37 +11,73 @@ The strongest demonstration of the system's discipline is its ability to remain 
 
 This is the spec's *"nothing concerning this week, here is the descriptive summary"* output. Treat it accordingly.
 
-## Format
+## Format — rendered markdown, NOT a code-fenced block
 
-A descriptive summary is a markdown block with the following sections in order:
+The descriptive summary is rendered as native markdown — same principle as the action cards. **Do NOT wrap the summary in `` ``` `` code fences.** That breaks visual hierarchy and looks like terminal output.
 
+### Canonical template
+
+```markdown
+## Weekly Summary — <domain> — <period>
+
+*Covers areas examined that did NOT produce action cards.*
+
+### What's stable
+
+- **<Metric 1>:** <one-line plain English — value, direction, comparison>
+- **<Metric 2>:** <one-line plain English>
+- **<Metric 3>:** <one-line plain English>
+- *(typically 3–6 bullets; each is one line)*
+
+### Structural observations (no action required)
+
+*Use this section for grade-C findings or relationships that are real but not card-worthy.*
+
+- **<Observation 1>:** <one short paragraph in plain English. Statistical methodology in the Methodology footer.>
+- **<Observation 2>:** <one short paragraph>
+
+### What would have constituted a finding
+
+> What thresholds was the system looking for that weren't crossed?
+
+- <Concrete signal 1 the system would have flagged — names the entity scope, metric, threshold>
+- <Concrete signal 2>
+- <Concrete signal 3>
+
+### Conclusion
+
+<One to two sentences in plain English. State the all-clear or the partial-all-clear with the appropriate calibration.>
+
+<details>
+<summary>What was examined & methodology</summary>
+
+- **Period:** <date range and granularity>
+- **Scope:** <entities and dimensions covered>
+- **Analytical agents that ran:** <list with one-line description per agent>
+- **Baselines checked:** <list>
+- **Statistical methods:** <test names, correction methods, sample sizes>
+- **Validator coverage:** <how many findings reviewed, grade distribution>
+
+</details>
+
+### Open data gaps
+
+| Priority | Gap | What would close it |
+|---|---|---|
+| HIGH | <gap 1> | <instrumentation request> |
+| MEDIUM | <gap 2> | <instrumentation request> |
+| LOW | <gap 3> | <instrumentation request> |
+
+**Source:** <dataset handle> | run <ISO timestamp>
 ```
-═══════════════════════════════════════════════════════════
-WEEKLY SUMMARY — <domain> — <period>
 
-PERIOD EXAMINED: <date range and granularity>
-SCOPE: <entities and dimensions covered>
+### Why this format works
 
-WHAT WAS EXAMINED:
-- <list of areas the pipeline looked at, with one-line description per area>
-
-BASELINES CHECKED:
-- <list of baselines the analysis compared against>
-
-KEY OBSERVATIONS (no action required):
-- <stable performance observation 1, with the metric and its current value vs. baseline>
-- <stable performance observation 2>
-- ... (typically 3–6 bullets)
-
-WHAT WOULD HAVE CONSTITUTED A FINDING:
-- <one to three concrete examples of what kind of signal would have triggered an action card this period — based on the actual thresholds used by the pipeline>
-
-CONCLUSION: <one to two sentences: "nothing rose to action level this period," with the appropriate level of confidence and any caveats from the run>
-
-OPEN DATA GAPS (if any): <surfaced from tracking-gaps>
-SOURCE: <dataset reference + run timestamp>
-═══════════════════════════════════════════════════════════
-```
+- **What's stable section first**: executives reading top-to-bottom see the all-clear before any caveats.
+- **Structural observations are clearly labeled as no-action**: they don't compete with cards for executive attention.
+- **Audit trail in collapsible `<details>`**: visible if someone wants it, invisible by default.
+- **Open data gaps as a table**: visually scannable, prioritized, with the "what would close it" column right there.
+- **No `═══` separators**: visual hierarchy from markdown headers, not from ASCII art.
 
 ## Section-by-section requirements
 

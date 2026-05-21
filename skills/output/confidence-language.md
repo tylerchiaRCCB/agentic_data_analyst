@@ -26,6 +26,31 @@ These translate statistical language into business-facing confidence levels:
 | Direction confirmed, magnitude uncertain | *"X dropped by an estimated <range>"* | *"X likely dropped by <range>; estimate uncertain due to..."* | *"X may have moved, but direction itself is not yet established with confidence"* |
 | Null result, adequately powered | *"No evidence of X within the detectable range (≥ <effect> at n=<size>)"* | *"No evidence of X above <threshold>; some sensitivity to..."* | *"No detectable effect; analysis was underpowered to rule out a smaller effect"* |
 
+## Statistical jargon stays in the Methodology footer — NOT in body text
+
+The recipient-facing body of any action card or descriptive summary uses **plain business English**. Statistical notation — `p`, `ρ`, `r`, `t`, `χ²`, `U`, "Spearman", "Pearson", "Mann-Whitney", "Kruskal-Wallis", "modified z-score", "Benjamini-Hochberg", "BH-adjusted", confidence interval bounds like `[−0.0112, −0.0038]`, sample-size annotations like `n=97` — does NOT appear in:
+
+- The ALERT line
+- The WHY THIS MATTERS section
+- The ROOT CAUSE section
+- The RECOMMENDED ACTION section
+- The descriptive-summary key observations
+- The TL;DR
+
+All statistical methodology — test names, p-values, test statistics, CI bounds, effect sizes with notation, sample sizes — lives in the Methodology footer at the bottom of each card, typically inside a `<details>` block. The body restates the same information in business language:
+
+| Statistical phrasing (Methodology footer) | Business phrasing (body) |
+|---|---|
+| `Spearman ρ=−0.235, BH-adjusted p=0.067, n=97` | "weakly negatively associated" or "a small inverse relationship" |
+| `Mann-Whitney U=0, p=0.000377` | "every observation falls outside the rest of the network's range" or "the gap is total" |
+| `modified z = −24.46` | "more extreme than any other entity by a wide margin" |
+| `n=4 weeks, no historical baseline` | "based on only 4 weeks of data, with no longer history available" |
+| `slope −0.0075/week, p=0.013` | "declining week after week" / "the metric is moving down each week" |
+| `Cohen's d = 0.6` | "a moderate difference" (with the absolute business-unit difference cited) |
+| `R² = 0.97` | omit, OR rephrase as "the trend is consistent across all 4 weeks" |
+
+The rule: **if the recipient is an executive, every sentence in the body should be readable by someone who has never taken a statistics course.** If they want methodology depth, they expand the `<details>` block at the bottom. The skill's job is to translate, not to make the recipient learn the system's analytical methods.
+
 ## Hedge words that mean something — and hedge words that don't
 
 **Use these — they encode specific uncertainty:**

@@ -41,7 +41,34 @@ You do not invent findings. You do not soften the Validator's grades. You do not
 
 8. **Suggest visualizations and emit Mermaid charts inline** per [visualization-recommendations.md](../skills/output/visualization-recommendations.md). When a finding's recommended chart fits within Mermaid's capabilities (line chart, bar chart, pie, flowchart), include a Mermaid block in `rendered_output_markdown` immediately after the prose recommendation. Use real numbers from the upstream `Statistic` objects, never placeholders. For chart types Mermaid doesn't support (box plots, scatter, heatmaps), emit only the prose recommendation. Skip Mermaid for grade-C findings (over-substantiates a preliminary signal) and for descriptive-summary sections about stable areas.
 
-9. **Render the final markdown.** Assemble action cards in priority order (grade A → B → C; within a grade, by entity importance or magnitude), followed by the descriptive summary if applicable. Output the combined markdown in `rendered_output_markdown`. Also populate the structured `action_cards[]` and `descriptive_summary` fields for downstream programmatic consumers (delivery channels, audit log).
+9. **Render the final markdown.** The combined output in `rendered_output_markdown` must have this structure, in this exact order:
+
+   ```
+   # <Report title — domain + period in plain English>
+
+   ## TL;DR
+   <3–5 bullets per insight-first-formatting.md TL;DR rules>
+
+   ## Run-level caveats
+   <Severity-tagged callouts for any high-severity run-level caveats: missing context, validator failure, prompt-injection detection, etc.>
+
+   ## Action Cards
+   <Each card rendered per proactive-action-card.md canonical template — markdown headers, bold, tables, callouts, inline Mermaid where the chart type fits. NO code-fence wrapping of cards. Order: grade A → B → C; within a grade, by business importance.>
+
+   ## Weekly Summary
+   <Per descriptive-summary-format.md template. Plain markdown sections, no code fences. Audit trail in <details>.>
+
+   ---
+   *<one-line methodology footer for the whole report>*
+   ```
+
+   Critical rules:
+   - **Never wrap cards or summary in `` ``` `` code fences.** That breaks Mermaid rendering and looks like terminal output.
+   - **TL;DR is non-negotiable** for any output with 2+ cards. Executive-only audience reads ONLY this section.
+   - **Statistical methodology lives in `<details>` blocks at the bottom of each card and the summary.** The body uses plain business English per confidence-language.md.
+   - **Only promote findings to cards if they have a specific, executable action** with owner / due / follow-up trigger. "No-action" findings go in the summary's Structural Observations section, never as cards.
+
+   Also populate the structured `action_cards[]` and `descriptive_summary` fields for downstream programmatic consumers (delivery channels, audit log).
 
 ## The empty-findings path
 
