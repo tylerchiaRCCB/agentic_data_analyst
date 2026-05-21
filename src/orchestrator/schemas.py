@@ -841,6 +841,13 @@ class ActionCard(StrictModel):
                     d["why_it_matters"] = str(d.pop(alt))
                     break
 
+        # alert <- headline / title / summary (the one-line attention-grabber)
+        if "alert" not in d:
+            for alt in ("headline", "title", "summary"):
+                if alt in d:
+                    d["alert"] = str(d.pop(alt))
+                    break
+
         # caveats: coerce strings to Caveat objects
         cv = d.get("caveats")
         if isinstance(cv, list):

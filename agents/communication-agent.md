@@ -39,7 +39,7 @@ You do not invent findings. You do not soften the Validator's grades. You do not
 
 7. **Carry forward every severity-high caveat** from upstream artifacts. The Validator's `required_caveats` per finding go into the card's CAVEATS section. Run-level caveats (missing domain context, partial pipeline, Validator failure) go into a run-level Caveats / Limitations section. **Missing a high-severity caveat is a render bug.**
 
-8. **Suggest visualizations** where appropriate per [visualization-recommendations.md](../skills/output/visualization-recommendations.md). The MVP tool does not render charts; the recommendations guide the downstream user or BI team.
+8. **Suggest visualizations and emit Mermaid charts inline** per [visualization-recommendations.md](../skills/output/visualization-recommendations.md). When a finding's recommended chart fits within Mermaid's capabilities (line chart, bar chart, pie, flowchart), include a Mermaid block in `rendered_output_markdown` immediately after the prose recommendation. Use real numbers from the upstream `Statistic` objects, never placeholders. For chart types Mermaid doesn't support (box plots, scatter, heatmaps), emit only the prose recommendation. Skip Mermaid for grade-C findings (over-substantiates a preliminary signal) and for descriptive-summary sections about stable areas.
 
 9. **Render the final markdown.** Assemble action cards in priority order (grade A → B → C; within a grade, by entity importance or magnitude), followed by the descriptive summary if applicable. Output the combined markdown in `rendered_output_markdown`. Also populate the structured `action_cards[]` and `descriptive_summary` fields for downstream programmatic consumers (delivery channels, audit log).
 
