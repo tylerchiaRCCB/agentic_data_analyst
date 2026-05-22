@@ -11,6 +11,7 @@ match types. This is the balance the design doc specifies.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -159,7 +160,7 @@ class Caveat(StrictModel):
         d = dict(data)
 
         if "text" not in d:
-            for alt in ("description", "caveat", "message"):
+            for alt in ("description", "caveat", "message", "detail"):
                 if alt in d:
                     d["text"] = d.pop(alt)
                     break
@@ -531,8 +532,27 @@ class DataRetrievalPayload(StrictModel):
             d["schema"] = normalized
             d.pop("schema_columns", None)
 
-        # Normalize column_metadata: ensure is_free_text defaults to False; canonicalize dtype
+        # Coerce dict-shaped column_metadata back to a list.
+        # Observed variant: model emits dataset-level notes ({"total_columns": N, ...})
+        # instead of the canonical per-column list. Fall back to building one entry per
+        # column from the normalized schema field.
         cm = d.get("column_metadata")
+        if isinstance(cm, dict):
+            schema_list = d.get("schema") if isinstance(d.get("schema"), list) else []
+            rebuilt = []
+            for col in schema_list:
+                if isinstance(col, dict) and "name" in col:
+                    rebuilt.append({
+                        "name": col["name"],
+                        "dtype": col.get("dtype", "string"),
+                        "null_count": 0,
+                        "distinct_count": 0,
+                        "is_free_text": False,
+                    })
+            d["column_metadata"] = rebuilt
+            cm = rebuilt
+
+        # Normalize column_metadata: ensure is_free_text defaults to False; canonicalize dtype
         if isinstance(cm, list):
             normalized_cm = []
             for item in cm:
@@ -833,6 +853,20 @@ class ActionCard(StrictModel):
                 if alt in d:
                     d["confidence"] = d[alt]  # leave original in place too — Literal will validate
                     break
+
+        # Coerce verbose grade strings → single letter.
+        # Observed variants: "HIGH (Grade B) -- Statistical case is grade-A..."
+        # First try to extract an explicit "Grade X" mention; fall back to the
+        # first uppercase letter; otherwise leave for Literal validation to reject.
+        conf = d.get("confidence")
+        if isinstance(conf, str) and conf not in {"A", "B", "C", "D", "F"}:
+            m = re.search(r"\bGrade\s+([A-F])\b", conf, re.IGNORECASE)
+            if not m:
+                m = re.search(r"\bgrade[-_\s]([A-F])\b", conf, re.IGNORECASE)
+            if not m:
+                m = re.search(r"\b([A-F])\b", conf)
+            if m:
+                d["confidence"] = m.group(1).upper()
 
         # why_it_matters <- why_this_matters / business_impact / impact_summary
         if "why_it_matters" not in d:

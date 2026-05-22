@@ -18,6 +18,7 @@ from src.orchestrator.schemas import (
     ActionCard,
     Caveat,
     CommunicationAgentPayload,
+    DataRetrievalPayload,
     FindingsValidatorPayload,
     LineageRef,
     OpportunityIdentifierPayload,
@@ -118,3 +119,77 @@ def test_unknown_fields_allowed() -> None:
     }
     result = validate_payload("findings-validator", raw)
     assert isinstance(result, FindingsValidatorPayload)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for observed LLM-output variants.
+# Each test pins a variant input -> canonical normalized output so the
+# normalizer surface only grows.
+# ---------------------------------------------------------------------------
+
+
+def test_caveat_normalizer_accepts_detail_alias() -> None:
+    """Observed variant: model returns `{detail: "...", title: "...", caveat_id: "..."}`
+    instead of `{text: "..."}`. The normalizer should coerce `detail` to `text`."""
+    c = Caveat.model_validate({
+        "detail": "Domain context document not loaded; thresholds are inferred.",
+        "severity": "high",
+        "title": "Missing context",
+        "caveat_id": "c1",
+    })
+    assert c.text == "Domain context document not loaded; thresholds are inferred."
+    assert c.severity == "high"
+
+
+def test_action_card_normalizer_extracts_grade_from_verbose_string() -> None:
+    """Observed variant: model emits a verbose confidence string like
+    `"HIGH (Grade B) -- Statistical case is grade-A..."` instead of the
+    bare letter. The normalizer should extract `B`."""
+    card = ActionCard.model_validate({
+        "alert": "Instock dropped",
+        "confidence": "HIGH (Grade B) -- Statistical case is grade-A...",
+        "why_it_matters": "x",
+        "root_cause": "x",
+        "recommended_action": "x",
+        "owner_role": "x",
+        "due": "x",
+        "follow_up_trigger": "x",
+    })
+    assert card.confidence == "B"
+
+
+def test_action_card_normalizer_extracts_grade_dash_form() -> None:
+    """The `grade-A` / `grade_C` form should also coerce."""
+    card = ActionCard.model_validate({
+        "alert": "x",
+        "confidence": "grade-A confidence based on triangulation",
+        "why_it_matters": "x",
+        "root_cause": "x",
+        "recommended_action": "x",
+        "owner_role": "x",
+        "due": "x",
+        "follow_up_trigger": "x",
+    })
+    assert card.confidence == "A"
+
+
+def test_data_retrieval_payload_coerces_dict_column_metadata() -> None:
+    """Observed variant: model returns column_metadata as a dataset-level dict
+    (`{total_columns: N, free_text_count: M}`) instead of a per-column list.
+    The normalizer should rebuild the list from the schema field."""
+    payload = DataRetrievalPayload.model_validate({
+        "dataset_handle": "h",
+        "data_source_type": "uploaded_file",
+        "source_reference": "/tmp/x.csv",
+        "row_count": 100,
+        "schema": [
+            {"name": "account_id", "dtype": "string", "nullable": False},
+            {"name": "instock_pct", "dtype": "float", "nullable": True},
+        ],
+        "column_metadata": {"total_columns": 2, "free_text_count": 0},
+    })
+    assert isinstance(payload.column_metadata, list)
+    assert len(payload.column_metadata) == 2
+    assert payload.column_metadata[0].name == "account_id"
+    assert payload.column_metadata[1].name == "instock_pct"
+    assert payload.column_metadata[1].is_free_text is False

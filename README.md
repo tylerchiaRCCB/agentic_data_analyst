@@ -181,6 +181,30 @@ uv run python -m src.tools.extract_context_gaps --run-id 20260520T223548Z-89dba6
 uv run python -m src.tools.extract_context_gaps --aggregate
 ```
 
+#### Where missing-context findings surface (and how to use them)
+
+The system flags context gaps in three places — same data, three audiences:
+
+1. **In the rendered recipient markdown** ([docs/examples/smoke-test-output.md](docs/examples/smoke-test-output.md) shows the format):
+   - **Run-level caveats** at the top — e.g., *"No domain context document loaded; thresholds are inferred."*
+   - **Per-card CAVEATS** — caveats specific to a finding (e.g., *"FTPR threshold of 88% is assumed industry standard; confirm with business."*)
+   - **Descriptive summary's "Open data gaps" table** — prioritized list.
+2. **In each agent's structured artifact** (`runs/<run_id>/artifacts/NN-<agent>.json`) — every payload has a `caveats[]` array with severity, text, and source. Findings Validator's artifact has `required_caveats` per finding.
+3. **Aggregated across runs** via `extract_context_gaps --aggregate` — five categories: `caveat`, `guardrail-pairing`, `data-gap`, `hypothesis-rationale`, `integrity-risk`.
+
+**Workflow for the domain-context conversation:** run the pipeline contextless against sanitized work-shaped data → run `extract_context_gaps --aggregate` → walk into the business meeting with a categorized list of *"here's what the agents couldn't determine without domain knowledge."* That output **is** the requirements document for the domain context doc — convert the high-priority gaps into the metric definitions, guardrail pairings, and threshold guidance that go into `context/domains/<domain>.md`.
+
+#### Submitting a variant when output validation fails
+
+When a downstream user's run fails schema validation (a stage's artifact won't parse), the framework needs the raw LLM output and a sanitized version of the input that produced it to add a normalizer + regression test. Workflow:
+
+1. **Capture the failed artifact.** It's already saved at `runs/<run_id>/artifacts/NN-<agent>.json` (or `replay-failed-payload.json` if the replay tool was used).
+2. **Sanitize.** Replace any work-specific column names, business terms, customer/account IDs, or domain values with generic placeholders.
+3. **Identify the variant.** Find the field where the LLM emitted a non-canonical shape (e.g., `detail` instead of `text`, a verbose string instead of a Literal value, a dict where a list was expected).
+4. **Submit upstream.** Paste the sanitized variant JSON + which field is non-canonical. The framework maintainer adds a normalizer in [src/orchestrator/schemas.py](src/orchestrator/schemas.py) and a regression test in [tests/test_artifact_schemas.py](tests/test_artifact_schemas.py) pinning the variant input → canonical output. Variants don't regress; the corpus grows.
+
+Existing variant tests at the bottom of `tests/test_artifact_schemas.py` are templates — copy one and substitute.
+
 ### Running tests
 
 ```bash
