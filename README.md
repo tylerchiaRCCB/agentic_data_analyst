@@ -217,7 +217,7 @@ Tests cover: prompt assembly, artifact schema validation, pipeline composition, 
 
 ### A note on initial testing — contextless by design
 
-The first runs are intentionally **contextless** — no `context/domains/<domain>.md` file is loaded. The orchestrator handles this permissively per [failure-recovery.md §6a](orchestration/failure-recovery.md): the pipeline runs, and the final output carries a high-severity caveat noting that no domain context was loaded. This lets the team observe how the agents handle raw sources before the domain context documents land (late next week / the following week).
+The first runs are intentionally **contextless** — no `context/domains/<domain>.md` file is loaded. The orchestrator handles this permissively per [failure-recovery.md §6a](orchestration/failure-recovery.md): the pipeline runs, and the final output carries a high-severity caveat noting that no domain context was loaded. This is the requirements-gathering phase: contextless runs surface the gaps (via `extract_context_gaps --aggregate`) that become the requirements document for the business meeting where the domain context is defined. The `context/domains/<domain>.md` file is written *after* that meeting, not before it.
 
 ## A note on what the system says when it has nothing to say
 
