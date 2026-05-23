@@ -58,3 +58,14 @@ row_threshold: 5000000
 # Parallelism cap for sibling analytical agents (pipeline-definitions.md §5.3).
 # MVP serializes; this is here for when the parallel-group execution lands.
 max_parallel_concurrency: 3
+
+# Hard per-run cost cap in USD. The BudgetTracker raises BudgetExceeded after a
+# stage completes if cumulative cost crosses this threshold; the pipeline aborts
+# cleanly (current stage's artifact is preserved). Set to null to disable.
+# Sized at ~2x the observed cost of a normal full run.
+max_cost_usd: 25.0
+
+# Soft warning thresholds for cost (fraction of max_cost_usd). When cumulative
+# cost crosses these, a warning is logged but execution continues. Final
+# threshold (1.0) is the hard abort.
+cost_warning_thresholds: [0.5, 0.75, 0.9]

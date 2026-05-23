@@ -23,6 +23,7 @@ failure-recovery.md §6a.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,11 @@ class AssembledPrompt:
     `system_prompt` is the concatenated string form (kept for display, dry-run reports,
     and token estimation). `system_blocks` is the structured form passed to the API
     with cache_control hints on the cacheable blocks.
+
+    Hash fields (`universal_skills_sha256`, `agent_block_sha256`, `prompt_sha256`)
+    pin the exact bytes of the prompt that produced an artifact. Stored in every
+    Artifact envelope for reproducibility — if a skill changes after a run, the
+    old artifact still records exactly which prompt-version it was generated from.
     """
 
     system_prompt: str
@@ -70,6 +76,13 @@ class AssembledPrompt:
     sections_loaded: list[str] = field(default_factory=list)
     missing_domain_context: bool = False
     domain_attempted: str | None = None
+    universal_skills_sha256: str = ""
+    agent_block_sha256: str = ""
+    prompt_sha256: str = ""
+
+
+def _sha256_hex(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _read(path: Path) -> str:
@@ -210,4 +223,7 @@ def assemble_prompt(
         sections_loaded=loaded_paths,
         missing_domain_context=missing,
         domain_attempted=attempted,
+        universal_skills_sha256=_sha256_hex(universal_text),
+        agent_block_sha256=_sha256_hex(agent_section_text),
+        prompt_sha256=_sha256_hex(concatenated),
     )

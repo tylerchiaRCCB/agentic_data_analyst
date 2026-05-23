@@ -33,7 +33,7 @@ from pydantic import ValidationError
 from src.api.claude_client import ClaudeClient, ClaudeResponse
 from src.observability.run_logger import RunLogger
 from src.observability.tracer import Tracer
-from src.orchestrator.budget_tracker import BudgetTracker
+from src.orchestrator.budget_tracker import BudgetExceeded, BudgetTracker
 from src.orchestrator.lineage_tracker import LineageTracker
 from src.orchestrator.prompt_assembler import AssembledPrompt, assemble_prompt
 from src.orchestrator.schemas import (
@@ -154,51 +154,84 @@ class PipelineExecutor:
         run = PipelineRun(run_id=self.run_logger.run_id)
         run.run_caveats = list(getattr(self, "_pending_run_caveats", []))
 
-        for i, stage in enumerate(framer.pipeline_composition, start=1):
-            # MVP: process parallel groups sequentially. Parallel execution is a future
-            # extension; the schema accepts the shape.
-            stages_to_run = stage.parallel if hasattr(stage, "parallel") else [stage]
-            for sub_stage in stages_to_run:
-                result = self._execute_stage(
-                    stage_index=i,
-                    agent=sub_stage.agent,
-                    skills=sub_stage.skills,
-                    upstream_artifacts=dict(run.artifacts_by_agent),
-                    dataset_file_id=dataset_file_id,
-                )
-                run.stage_results.append(result)
+        try:
+            for i, stage in enumerate(framer.pipeline_composition, start=1):
+                # MVP: process parallel groups sequentially. Parallel execution is a future
+                # extension; the schema accepts the shape.
+                stages_to_run = stage.parallel if hasattr(stage, "parallel") else [stage]
+                for sub_stage in stages_to_run:
+                    result = self._execute_stage(
+                        stage_index=i,
+                        agent=sub_stage.agent,
+                        skills=sub_stage.skills,
+                        upstream_artifacts=dict(run.artifacts_by_agent),
+                        dataset_file_id=dataset_file_id,
+                    )
+                    run.stage_results.append(result)
 
-                if result.status == "ok":
-                    run.artifacts_by_agent[result.agent] = result.artifact
-                    self.lineage.add_artifact_statistics(
-                        agent=result.agent,
-                        stage_index=result.stage_index,
-                        payload=result.artifact.get("payload", {}),
-                    )
-                elif result.status == "degraded":
-                    run.artifacts_by_agent[result.agent] = result.artifact
-                    run.run_caveats.append(
-                        {
-                            "text": f"Stage {result.agent} degraded: {result.error}",
-                            "severity": "high",
-                            "reason": "stage degradation",
-                        }
-                    )
-                    run.status = "degraded"
-                else:  # failed
-                    if result.agent in CRITICAL_AGENTS:
-                        run.status = "failed"
-                        self._write_failure_report(run, result)
-                        return run
-                    # Non-critical: skip-and-flag
-                    run.run_caveats.append(
-                        {
-                            "text": f"Stage {result.agent} failed and was skipped. Analytical depth in this area is reduced.",
-                            "severity": "high",
-                            "reason": "agent total failure",
-                        }
-                    )
-                    run.status = "degraded"
+                    if result.status == "ok":
+                        run.artifacts_by_agent[result.agent] = result.artifact
+                        self.lineage.add_artifact_statistics(
+                            agent=result.agent,
+                            stage_index=result.stage_index,
+                            payload=result.artifact.get("payload", {}),
+                        )
+                    elif result.status == "degraded":
+                        run.artifacts_by_agent[result.agent] = result.artifact
+                        run.run_caveats.append(
+                            {
+                                "text": f"Stage {result.agent} degraded: {result.error}",
+                                "severity": "high",
+                                "reason": "stage degradation",
+                            }
+                        )
+                        run.status = "degraded"
+                    else:  # failed
+                        if result.agent in CRITICAL_AGENTS:
+                            run.status = "failed"
+                            self._write_failure_report(run, result)
+                            return run
+                        # Non-critical: skip-and-flag
+                        run.run_caveats.append(
+                            {
+                                "text": f"Stage {result.agent} failed and was skipped. Analytical depth in this area is reduced.",
+                                "severity": "high",
+                                "reason": "agent total failure",
+                            }
+                        )
+                        run.status = "degraded"
+        except BudgetExceeded as e:
+            # Hard cost cap hit. Preserve the most recent stage's artifact (already
+            # appended to stage_results); mark the run aborted with a high-severity
+            # caveat the Communication Agent will not see — the pipeline is over.
+            self.run_logger.error(
+                "Pipeline aborted: cost cap exceeded",
+                total_cost_usd=round(e.total_cost_usd, 4),
+                max_cost_usd=e.max_cost_usd,
+                stage_index=e.stage_index,
+                agent=e.agent,
+            )
+            run.status = "failed"
+            run.run_caveats.append(
+                {
+                    "text": (
+                        f"Pipeline aborted: cumulative cost ${e.total_cost_usd:.4f} exceeded "
+                        f"configured cap ${e.max_cost_usd:.2f} after stage {e.stage_index} ({e.agent})."
+                    ),
+                    "severity": "high",
+                    "reason": "budget_exceeded",
+                }
+            )
+            # Write failure report so the operator sees the abort with full context
+            failure_result = StageResult(
+                stage_index=e.stage_index,
+                agent=e.agent,
+                status="failed",
+                error=f"Budget cap exceeded (${e.total_cost_usd:.4f} > ${e.max_cost_usd:.2f})",
+                artifact={},
+                duration_ms=0,
+            )
+            self._write_failure_report(run, failure_result)
 
         return run
 
@@ -343,6 +376,14 @@ class PipelineExecutor:
                 ).model_dump(),
                 "status": "ok",
                 "payload": parsed,
+                # Pin the prompt that produced this artifact. If any skill file
+                # changes after this run, the SHA still records the bytes that
+                # generated the payload — reproducibility / audit guarantee.
+                "prompt_sha256": prompt.prompt_sha256,
+                "skill_hashes": {
+                    "universal": prompt.universal_skills_sha256,
+                    "agent_block": prompt.agent_block_sha256,
+                },
             }
             self.run_logger.write_artifact(stage_index, agent, artifact)
             return artifact

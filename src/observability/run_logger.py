@@ -1,7 +1,8 @@
 """Per-run file-based logger.
 
 Each pipeline run gets its own directory under `runs/<run_id>/` containing:
-- `run.log` — structured log lines (one per event)
+- `run.jsonl` — one JSON object per line (machine-parseable; Datadog/Splunk-ready)
+- `run.log` — human-readable text mirror of the same events
 - `spans.jsonl` — span trace from the Tracer
 - `artifacts/<stage_index>-<agent>.json` — artifact dumps for replay/audit
 - `lineage.json` — final lineage manifest (written by lineage_tracker)
@@ -36,8 +37,32 @@ def _short_uuid() -> str:
     return uuid.uuid4().hex[:8]
 
 
+class _JSONLineFormatter(logging.Formatter):
+    """Emit each log record as a single-line JSON object.
+
+    Required fields: timestamp (ISO-8601 UTC), level, run_id, message.
+    Optional `extras` dict carries structured fields passed via RunLogger.info(**fields).
+    """
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__()
+        self.run_id = run_id
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "run_id": self.run_id,
+            "msg": record.getMessage(),
+        }
+        extras = getattr(record, "extras", None)
+        if isinstance(extras, dict) and extras:
+            payload["attrs"] = extras
+        return json.dumps(payload, default=str, ensure_ascii=False)
+
+
 class RunLogger:
-    """Per-run logger writing to both a file and stdout."""
+    """Per-run logger writing structured JSON to a file and human-readable to stdout."""
 
     def __init__(self, run_id: str, runs_root: Path = DEFAULT_RUNS_ROOT) -> None:
         self.run_id = run_id
@@ -45,20 +70,27 @@ class RunLogger:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "artifacts").mkdir(exist_ok=True)
 
-        # Python logger setup — write to run.log and stdout
+        # Python logger setup — JSON to run.jsonl, human-readable to stdout + run.log mirror
         self._logger = logging.getLogger(f"run.{run_id}")
         self._logger.setLevel(logging.INFO)
         # Avoid duplicate handlers if RunLogger is constructed twice for the same id
         if not self._logger.handlers:
-            file_handler = logging.FileHandler(self.run_dir / "run.log", encoding="utf-8")
-            file_handler.setFormatter(
+            # 1) JSONL file — structured, machine-parseable
+            jsonl_handler = logging.FileHandler(self.run_dir / "run.jsonl", encoding="utf-8")
+            jsonl_handler.setFormatter(_JSONLineFormatter(run_id))
+            self._logger.addHandler(jsonl_handler)
+
+            # 2) Human-readable text mirror — same content, more readable for tail -f
+            text_handler = logging.FileHandler(self.run_dir / "run.log", encoding="utf-8")
+            text_handler.setFormatter(
                 logging.Formatter(
                     "%(asctime)s %(levelname)s %(message)s",
                     datefmt="%Y-%m-%dT%H:%M:%SZ",
                 )
             )
-            self._logger.addHandler(file_handler)
+            self._logger.addHandler(text_handler)
 
+            # 3) Stdout — human-readable for live runs
             stdout_handler = logging.StreamHandler(sys.stdout)
             stdout_handler.setFormatter(logging.Formatter("%(message)s"))
             self._logger.addHandler(stdout_handler)
@@ -66,13 +98,20 @@ class RunLogger:
     # ---------- General logging ----------
 
     def info(self, msg: str, **fields: Any) -> None:
-        self._logger.info(self._format(msg, fields))
+        self._emit(logging.INFO, msg, fields)
 
     def warning(self, msg: str, **fields: Any) -> None:
-        self._logger.warning(self._format(msg, fields))
+        self._emit(logging.WARNING, msg, fields)
 
     def error(self, msg: str, **fields: Any) -> None:
-        self._logger.error(self._format(msg, fields))
+        self._emit(logging.ERROR, msg, fields)
+
+    def _emit(self, level: int, msg: str, fields: dict[str, Any]) -> None:
+        # Stash structured fields on the record so the JSON formatter can render them
+        # as a separate `attrs` key. The text formatter ignores `extras` and shows the
+        # human-friendly suffix appended via _format.
+        record_msg = self._format(msg, fields)
+        self._logger.log(level, record_msg, extra={"extras": fields})
 
     @staticmethod
     def _format(msg: str, fields: dict[str, Any]) -> str:

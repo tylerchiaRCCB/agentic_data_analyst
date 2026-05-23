@@ -189,6 +189,8 @@ def main() -> int:
     budget = BudgetTracker(
         budget_tokens=cfg.get("budget_tokens_default", 1_200_000),
         cost_per_million=cfg.get("cost_per_million", {}),
+        max_cost_usd=cfg.get("max_cost_usd"),
+        cost_warning_thresholds=cfg.get("cost_warning_thresholds", [0.5, 0.75, 0.9]),
     )
 
     # ---- Upload dataset to Anthropic Files API for code execution ----

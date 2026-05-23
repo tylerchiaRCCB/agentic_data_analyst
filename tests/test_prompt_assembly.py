@@ -73,3 +73,27 @@ def test_section_order() -> None:
     agent_pos = sp.index("AGENT DEFINITION")
     skills_pos = sp.index("ON-DEMAND SKILLS")
     assert universal_pos < agent_pos < skills_pos
+
+
+def test_prompt_sha256_pinned_in_assembled_prompt() -> None:
+    """Each AssembledPrompt carries SHAs that pin its exact byte content for
+    artifact reproducibility. Hashes are 64-char hex strings."""
+    r = assemble_prompt(agent_name="data-profiler")
+    assert len(r.prompt_sha256) == 64
+    assert len(r.universal_skills_sha256) == 64
+    assert len(r.agent_block_sha256) == 64
+    # Re-assembling should produce identical hashes (deterministic).
+    r2 = assemble_prompt(agent_name="data-profiler")
+    assert r.prompt_sha256 == r2.prompt_sha256
+    assert r.universal_skills_sha256 == r2.universal_skills_sha256
+    assert r.agent_block_sha256 == r2.agent_block_sha256
+
+
+def test_prompt_sha256_differs_across_agents() -> None:
+    """Different agents → different prompt hashes (different agent block).
+    Universal-skills hash is the same — that's the whole point of caching it."""
+    a = assemble_prompt(agent_name="data-profiler")
+    b = assemble_prompt(agent_name="findings-validator", skills=["statistical-revalidation"])
+    assert a.universal_skills_sha256 == b.universal_skills_sha256
+    assert a.agent_block_sha256 != b.agent_block_sha256
+    assert a.prompt_sha256 != b.prompt_sha256
