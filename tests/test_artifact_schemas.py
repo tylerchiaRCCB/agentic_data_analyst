@@ -193,3 +193,69 @@ def test_data_retrieval_payload_coerces_dict_column_metadata() -> None:
     assert payload.column_metadata[0].name == "account_id"
     assert payload.column_metadata[1].name == "instock_pct"
     assert payload.column_metadata[1].is_free_text is False
+
+
+# ---------------------------------------------------------------------------
+# Structural-rigor enforcement on Statistic.
+# A group_comparison/correlation/regression statistic without effect_size or
+# confidence_interval cannot be validated — the artifact itself rejects it.
+# ---------------------------------------------------------------------------
+
+
+def test_statistic_descriptive_kind_does_not_require_effect_size() -> None:
+    """Descriptive statistics (means, counts) are exempt from the effect-size rule."""
+    from src.orchestrator.schemas import Statistic, LineageRef
+    s = Statistic(
+        id="s1", metric="mean_volume", value=142.5, computation="df.volume.mean()",
+        sample_size=1000, statistic_kind="descriptive",
+        lineage=LineageRef(source="dataset", data_slice="all", code_ref="cell_12"),
+    )
+    assert s.statistic_kind == "descriptive"
+
+
+def test_statistic_group_comparison_requires_effect_size() -> None:
+    """A group_comparison statistic without effect_size raises ValidationError."""
+    from pydantic import ValidationError
+    from src.orchestrator.schemas import Statistic, LineageRef
+    with pytest.raises(ValidationError) as exc:
+        Statistic(
+            id="s1", metric="volume_diff", value=12.3,
+            computation="mannwhitneyu(a, b)",
+            sample_size=200,
+            p_value=0.001,
+            confidence_interval={"lower": 5.0, "upper": 20.0, "level": 0.95},
+            statistic_kind="group_comparison",
+            # effect_size MISSING
+            lineage=LineageRef(source="dataset", data_slice="region=NE,SE", code_ref="cell_5"),
+        )
+    assert "effect_size" in str(exc.value)
+
+
+def test_statistic_correlation_requires_confidence_interval() -> None:
+    """A correlation statistic without confidence_interval raises ValidationError."""
+    from pydantic import ValidationError
+    from src.orchestrator.schemas import Statistic, LineageRef
+    with pytest.raises(ValidationError) as exc:
+        Statistic(
+            id="s1", metric="spearman_rho", value=-0.235,
+            computation="spearmanr(x, y)",
+            sample_size=97,
+            p_value=0.067,
+            effect_size={"kind": "spearman_rho", "value": -0.235},
+            # confidence_interval MISSING
+            statistic_kind="correlation",
+            lineage=LineageRef(source="dataset", data_slice="all", code_ref="cell_8"),
+        )
+    assert "confidence_interval" in str(exc.value)
+
+
+def test_statistic_other_kind_is_unenforced_for_backward_compat() -> None:
+    """Legacy artifacts without statistic_kind default to 'other' — no enforcement."""
+    from src.orchestrator.schemas import Statistic, LineageRef
+    s = Statistic(
+        id="s1", metric="something", value=1.0, computation="x",
+        sample_size=10,
+        lineage=LineageRef(source="dataset", data_slice="all", code_ref="cell_1"),
+    )
+    assert s.statistic_kind == "other"
+    # No effect_size required, no CI required

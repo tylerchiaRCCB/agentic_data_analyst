@@ -14,6 +14,8 @@
    - Confidence interval at a stated level (typically 95%).
    - p-value when relevant — but **never as the sole evidence**. Practical significance lives in the effect size and CI, not in p alone.
 
+   **This is now structurally enforced.** Every `Statistic` artifact carries a `statistic_kind` field. When the kind is `group_comparison`, `correlation`, or `regression`, the artifact will be REJECTED at validation if `effect_size` or `confidence_interval` is missing. The Validator's Layer 1 rigor check used to catch this; now the artifact itself cannot exist without it. Set `statistic_kind` honestly when emitting Statistics — `descriptive` for means/counts, `group_comparison` for t-tests/Mann-Whitney/ANOVA, `correlation` for Pearson/Spearman/partial, `regression` for OLS/GLM, `change_point`/`outlier` for those, and `other` only when none of the above apply.
+
 3. **Choose the right test.** Selection rules:
    - Continuous, normal-ish, two groups: independent-samples t-test (Welch's by default — do not assume equal variance).
    - Continuous, skewed or ordinal, two groups: Mann-Whitney U.
@@ -24,6 +26,8 @@
    For skewed metrics — the norm across our CPG company's functional domains (sales: volume, basket size, promotional lift; supply chain: days-of-supply, lead time; operations: cycle-time, downtime duration; finance: gross margin per case, trade deduction value; trade marketing: campaign lift) — default to non-parametric or resistant alternatives. The Profiler's distribution classification drives this choice. See [resistant-statistics.md](resistant-statistics.md).
 
 4. **Apply multiple-comparison correction when running many tests.** When examining many variable pairs, group comparisons, or anomaly candidates in a single run, the family-wise false-positive rate grows fast. Default: Benjamini-Hochberg FDR control at q = 0.10 for exploratory analysis (most agent work). Use Bonferroni for confirmatory tests. Report the correction method applied; an uncorrected p-value from a large search is not a finding.
+
+   **Statistic artifacts carry a `correction_method` field.** Set it to `"benjamini-hochberg"`, `"bonferroni"`, `"holm"`, or `"none-justified"` (with a justification in `correction_notes`). The Validator will downgrade findings citing uncorrected statistics from a multi-comparison search.
 
 5. **Distinguish correlation from causation, explicitly.** Statistical association is association — full stop. Causal language ("X caused Y", "X drove Y") requires either an experimental design or a documented causal-inference methodology with stated assumptions. In the MVP, default to associational language: *"X is associated with Y after controlling for Z."* The Root Cause Investigator may go further, but only with the `causation_vs_correlation` field on its primary cause set honestly (often `strong_correlation`, not `established_causal`).
 

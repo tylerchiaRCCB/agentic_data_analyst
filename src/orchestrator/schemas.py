@@ -127,6 +127,25 @@ class LineageRef(StrictModel):
     notes: str | None = None
 
 
+StatisticKind = Literal[
+    "descriptive",       # mean, median, count — no effect size or CI required
+    "group_comparison",  # t-test, Mann-Whitney, ANOVA — effect size + CI required
+    "correlation",       # Pearson, Spearman, partial — effect size + CI required
+    "regression",        # OLS, GLM — effect size + CI required
+    "change_point",      # PELT, BCP — effect size encoded as magnitude; CI optional
+    "outlier",           # modified z, Mahalanobis — magnitude required
+    "other",             # legacy / unclassified — no enforcement
+]
+
+# Kinds that REQUIRE both an effect_size and a confidence_interval per
+# statistical-rigor.md §2 ("full statistical picture"). The Validator's Layer 1
+# rejection of an effect-size-less group comparison is now a structural property
+# of the artifact, not a prompt-imposed convention.
+EFFECT_SIZE_REQUIRED_KINDS: frozenset[StatisticKind] = frozenset({
+    "group_comparison", "correlation", "regression"
+})
+
+
 class Statistic(StrictModel):
     id: str
     metric: str
@@ -138,6 +157,38 @@ class Statistic(StrictModel):
     p_value: float | None = None
     effect_size: dict[str, Any] | None = None  # {"kind", "value"}
     lineage: LineageRef
+    # NEW: the kind of statistic this is. Drives required-field enforcement below.
+    # Defaults to "other" for backward compatibility with legacy artifacts that
+    # do not set this field; new agent emissions should always set it explicitly.
+    statistic_kind: StatisticKind = "other"
+    # NEW: the multiple-comparison correction method, REQUIRED for any statistic
+    # that is one of N>1 comparisons in the same run (per statistical-rigor.md §4).
+    # Acceptable values: "benjamini-hochberg", "bonferroni", "holm", "none-justified".
+    # "none-justified" must come with a justification string in `correction_notes`.
+    correction_method: str | None = None
+    correction_notes: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_required_fields_by_kind(self) -> "Statistic":
+        """Structural rigor enforcement (statistical-rigor.md §2).
+
+        Group comparisons, correlations, and regressions MUST report effect size
+        and confidence interval. The validator's Layer 1 used to catch this; now
+        the artifact itself cannot exist without them. A finding cannot cite a
+        comparison statistic that lacks effect-size — no exceptions, no caveats.
+        """
+        if self.statistic_kind in EFFECT_SIZE_REQUIRED_KINDS:
+            if self.effect_size is None:
+                raise ValueError(
+                    f"Statistic id={self.id!r} kind={self.statistic_kind!r} requires "
+                    f"effect_size (per statistical-rigor.md §2)."
+                )
+            if self.confidence_interval is None:
+                raise ValueError(
+                    f"Statistic id={self.id!r} kind={self.statistic_kind!r} requires "
+                    f"confidence_interval (per statistical-rigor.md §2)."
+                )
+        return self
 
 
 class Caveat(StrictModel):
