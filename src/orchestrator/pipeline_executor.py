@@ -286,6 +286,12 @@ class PipelineExecutor:
                     duration_ms=artifact.get("duration_ms", 0),
                     skill_paths_loaded=prompt.sections_loaded,
                 )
+            except BudgetExceeded:
+                # Let the cost-cap abort bubble up to execute_pipeline's handler,
+                # which writes a clean failure report and marks the run failed.
+                # If we swallow it here, the stage becomes just another failed
+                # stage and the cap doesn't actually stop the pipeline.
+                raise
             except Exception as e:
                 stage_duration_ms = int((time.perf_counter() - t0) * 1000)
                 self.run_logger.error(

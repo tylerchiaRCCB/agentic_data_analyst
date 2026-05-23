@@ -1,0 +1,342 @@
+{
+  "agent": "time-series-analyzer",
+  "schema_version": "4.6",
+  "dataset": "smoke-test.csv",
+  "analysis_design": {
+    "question": "Across account \u00d7 SKU \u00d7 week (2026-04-27 through 2026-05-18), do any metrics \u2014 volume, instock_rate, acv_weighted_distribution, fill_rate \u2014 exhibit a statistically detectable temporal trend, change point, or persistent anomaly relative to the trailing baseline, and if so, in which entities and at what magnitude?",
+    "decision_downstream": "Proactive monitoring: identify entities and metrics warranting follow-up by account managers or supply planners before the next weekly run.",
+    "data_requirements": {
+      "required_columns": [
+        "account_id",
+        "sku",
+        "week",
+        "volume",
+        "instock_rate",
+        "acv_weighted_distribution",
+        "fill_rate"
+      ],
+      "required_grain": "account_id \u00d7 sku \u00d7 week",
+      "required_time_window": "2026-04-27 through 2026-05-18 (4 weeks)",
+      "ideal_but_unavailable": "Trailing 13-week baseline; same-period prior-year data; external benchmarks for instock/fill thresholds. Short window materially limits confidence in all trend estimates."
+    },
+    "success_definition": "A successful run either (a) identifies one or more temporal signals with computed slope, p-value, CI, and entity attribution, OR (b) concludes that no statistically detectable temporal trend or change point exists within the 4-week window \u2014 both are valid outcomes.",
+    "null_result_definition": "No metric shows a statistically significant (p < 0.10) slope across the 4-week window at the aggregate or any stratified level, and no entity deviates persistently from the population distribution. Finding: dataset is stable and no action is warranted this week."
+  },
+  "techniques_applied": {
+    "stl_decomposition": false,
+    "stl_skip_reason": "Only 4 weekly observations are present. STL requires at least 2 full cycles of the suspected seasonal period. With a weekly cadence and presumed annual or 52-week seasonality, 4 observations represent less than 0.1 cycles. Decomposition is not computable and would be meaningless.",
+    "change_point_detection": false,
+    "change_point_skip_reason": "PELT, CUSUM, and BIC-based change-point methods require a minimum of ~10\u201315 observations to estimate a stable baseline segment and a post-change segment. With 4 aggregate weekly points, no algorithm can reliably distinguish a structural level shift from noise. Change-point detection deferred until \u2265 13 weeks of data are available.",
+    "cohort_analysis": false,
+    "cohort_skip_reason": "No launch or entry events are present in the dataset; all 5 accounts and 5 SKUs appear in all 4 weeks. Cohort analysis on time-since-entry is not applicable.",
+    "trend_slope_regression": true,
+    "trend_slope_regression_rationale": "With 4 time-ordered observations, OLS linear regression on weekly medians is the only computable temporal statistic. Results are interpreted with extreme caution given n=4; high R\u00b2 values can arise trivially with small samples. Only slopes with p < 0.10 and supporting within-entity evidence are treated as signals.",
+    "resistant_statistics_applied": true,
+    "resistant_statistics_rationale": "Volume and instock_rate are classified as right-skewed and left-skewed-heavy-tail respectively by the Data Profiler (use_resistant_statistics: true). All temporal summaries for these metrics use weekly medians and MAD/IQR. Fill_rate and acv_weighted_distribution are approximately normal; classical statistics used."
+  },
+  "stationarity_assessment": {
+    "method": "Qualitative \u2014 coefficient of variation of weekly medians; formal tests (ADF, KPSS) not applicable at n=4.",
+    "findings": [
+      {
+        "metric": "volume",
+        "cv_of_weekly_medians_pct": 9.88,
+        "range": [
+          748.0,
+          933.0
+        ],
+        "assessment": "Moderate variability. Weekly medians oscillate (774, 920, 933, 748) with no monotone direction. Modified z-scores of weekly medians are all below 1.0 in absolute value \u2014 no week is an extreme outlier at the aggregate level. Series is likely stationary but evidence is insufficient to confirm formally."
+      },
+      {
+        "metric": "instock_rate",
+        "cv_of_weekly_medians_pct": 1.08,
+        "range": [
+          0.912,
+          0.94
+        ],
+        "assessment": "Very low variability. Population excluding A003/SKU003 is stable (0.917\u20130.941). A003/SKU003 produces a persistent left-tail outlier across all 4 weeks but does not create a trend \u2014 the outlier is structural, not temporal."
+      },
+      {
+        "metric": "acv_weighted_distribution",
+        "cv_of_weekly_medians_pct": 3.49,
+        "range": [
+          0.758,
+          0.828
+        ],
+        "assessment": "Moderate variability with a dip in week 2 (0.758) before recovery to 0.825\u20130.828 in weeks 3\u20134. No statistically significant trend (slope=+0.0121/week, p=0.519). Likely stationary."
+      },
+      {
+        "metric": "fill_rate",
+        "cv_of_weekly_medians_pct": 0.42,
+        "range": [
+          0.948,
+          0.958
+        ],
+        "assessment": "Very low aggregate variability. However, A001 exhibits a monotone decline with high within-account fit (R\u00b2=0.974), suggesting A001 is undergoing a slow deterioration masked in the aggregate by stable performance at other accounts."
+      }
+    ]
+  },
+  "change_points": [],
+  "temporal_outliers": [
+    {
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "outlier_type": "persistent_structural_underperformance",
+      "weeks_affected": [
+        "2026-04-27",
+        "2026-05-04",
+        "2026-05-11",
+        "2026-05-18"
+      ],
+      "values": [
+        0.641,
+        0.739,
+        0.669,
+        0.656
+      ],
+      "entity_mean": 0.676,
+      "population_median_excl_entity": 0.927,
+      "gap_vs_population": -0.251,
+      "gap_pct": -27.1,
+      "trend_within_window": {
+        "slope_per_week": -0.0025,
+        "p_value": 0.926,
+        "r_squared": 0.006,
+        "interpretation": "No directional trend within the 4-week window. The underperformance is uniformly persistent, not improving or worsening."
+      },
+      "classification": "This is a persistent structural outlier, not a temporal anomaly. The pattern predates the observable window; the 4-week dataset cannot determine onset. Escalated as a finding for Root Cause Investigation.",
+      "confidence": "high"
+    }
+  ],
+  "trend_signals": [
+    {
+      "entity": "A001",
+      "metric": "fill_rate",
+      "scope": "account-level (median across 5 SKUs)",
+      "signal_type": "monotone_decline",
+      "weekly_medians": {
+        "2026-04-27": 0.951,
+        "2026-05-04": 0.945,
+        "2026-05-11": 0.939,
+        "2026-05-18": 0.928
+      },
+      "slope_per_week": -0.0075,
+      "slope_se": 0.00085,
+      "ci_95": [
+        -0.0092,
+        -0.0058
+      ],
+      "r_squared": 0.974,
+      "p_value": 0.0131,
+      "n_observations": 4,
+      "cumulative_change": {
+        "absolute": -0.023,
+        "relative_pct": -2.42,
+        "from_week": "2026-04-27",
+        "to_week": "2026-05-18"
+      },
+      "week4_vs_population_p25": "Week4 value (0.928) is below the dataset-wide p25 for fill_rate (0.935), crossing into the lower quartile of the distribution.",
+      "sku_level_triangulation": {
+        "SKU001": {
+          "slope": -0.0131,
+          "p_value": 0.092,
+          "r_squared": 0.825,
+          "note": "Directionally consistent, marginally significant"
+        },
+        "SKU002": {
+          "slope": 0.0055,
+          "p_value": 0.516,
+          "r_squared": 0.235,
+          "note": "Diverges \u2014 not contributing to decline"
+        },
+        "SKU003": {
+          "slope": 0.006,
+          "p_value": 0.581,
+          "r_squared": 0.175,
+          "note": "Diverges \u2014 not contributing to decline"
+        },
+        "SKU004": {
+          "slope": -0.0153,
+          "p_value": 0.022,
+          "r_squared": 0.956,
+          "note": "Primary driver \u2014 monotone decline, statistically significant at SKU level"
+        },
+        "SKU005": {
+          "slope": -0.0073,
+          "p_value": 0.376,
+          "r_squared": 0.389,
+          "note": "Directionally consistent, not individually significant"
+        }
+      },
+      "triangulation_verdict": "Signal survives two lenses: account-level (p=0.013) and SKU-level (SKU004: p=0.022, SKU001: p=0.092 directionally consistent). Two of five SKUs diverge (SKU002, SKU003). The decline is real at the account level but not uniformly distributed across SKUs \u2014 SKU004 is the primary contributor.",
+      "confidence": "medium",
+      "confidence_rationale": "Slope is statistically significant (p=0.013) with very high fit (R\u00b2=0.974) at the account level, and confirmed by one SKU (SKU004, p=0.022). Downgraded from high to medium because n=4 inflates R\u00b2 trivially and because only 2 of 5 SKUs individually contribute. Causal attribution is not possible from this data alone.",
+      "caveats": [
+        "n=4 means R\u00b2=0.974 is necessary but not sufficient to confirm a durable trend; a single aberrant observation in week 5 would falsify the signal.",
+        "No prior-year or extended baseline is available to determine whether this rate of decline is seasonal or structural.",
+        "Absolute fill_rate (0.928 in week 4) remains above the dataset p5 (0.922); the decline has not yet reached the distributional extreme."
+      ]
+    },
+    {
+      "entity": "A001",
+      "metric": "fill_rate",
+      "scope": "SKU004 (primary contributor)",
+      "signal_type": "monotone_decline",
+      "weekly_values": {
+        "2026-04-27": 0.969,
+        "2026-05-04": 0.945,
+        "2026-05-11": 0.939,
+        "2026-05-18": 0.92
+      },
+      "slope_per_week": -0.0153,
+      "slope_se": 0.00117,
+      "ci_95": [
+        -0.01987,
+        -0.01073
+      ],
+      "r_squared": 0.956,
+      "p_value": 0.0224,
+      "n_observations": 4,
+      "cumulative_change": {
+        "absolute": -0.049,
+        "relative_pct": -5.06,
+        "from_week": "2026-04-27",
+        "to_week": "2026-05-18"
+      },
+      "confidence": "medium",
+      "confidence_rationale": "Statistically significant at n=4 with monotone values. Same small-n caveat applies. Consistent with and partially explains the A001 account-level signal."
+    }
+  ],
+  "null_findings": [
+    {
+      "metric": "volume",
+      "scope": "aggregate",
+      "finding": "The -13.9% week-4 drop in aggregate volume median (748 vs. 869 trailing 3-week) is not a statistically detectable trend. Aggregate OLS slope: -6.50 cases/week, p=0.913, R\u00b2=0.008. Modified z-scores of all four weekly medians are below 1.0. The oscillating pattern (774\u2192920\u2192933\u2192748) is consistent with noise around a stationary level, not a directional decline.",
+      "stratification_note": "The week-4 aggregate drop is driven entirely by A001 (week4=748, trailing median=858, pct_change=-12.8%). All other accounts are flat or up: A002 +4.6%, A003 +2.8%, A004 +14.4%, A005 +9.2%. This is an account-specific observation, not a system-wide volume trend.",
+      "recommendation_to_downstream": "The A001 week-4 volume drop (-12.8%) should be noted as a candidate signal alongside the A001 fill_rate decline, but the temporal evidence for a volume trend is weak (p=0.913). The Root Cause Investigator should investigate A001 holistically."
+    },
+    {
+      "metric": "instock_rate",
+      "scope": "aggregate and population (excl. A003/SKU003)",
+      "finding": "No temporal trend. Aggregate slope: -0.0052/week, p=0.422, R\u00b2=0.335. Population excluding A003/SKU003 is stable across all 4 weeks (0.917\u20130.941 weekly medians). No change point detectable."
+    },
+    {
+      "metric": "acv_weighted_distribution",
+      "scope": "aggregate",
+      "finding": "No temporal trend. Slope: +0.0121/week, p=0.519, R\u00b2=0.232. Week-2 dip (0.758) followed by recovery to 0.825\u20130.828 in weeks 3\u20134. The previously noted divergence from volume (ACV up while volume down in week 4) is real in direction but neither series has a statistically significant trend. No action warranted on ACV alone."
+    },
+    {
+      "metric": "fill_rate",
+      "scope": "aggregate (all accounts)",
+      "finding": "Aggregate slope is -0.00310/week (p=0.125, R\u00b2=0.766). Not individually significant at the aggregate level; the A001 decline is diluted by stable performance at A002\u2013A005. The aggregate result is a null finding; the entity-level signal (A001) is surfaced separately in trend_signals."
+    }
+  ],
+  "cohort_analysis": null,
+  "tracking_gaps": [
+    {
+      "gap": "Trailing 13-week baseline",
+      "impact": "High. Standard baseline for robust trend detection cannot be computed. All slope estimates rest on 3 pre-period weeks. A single anomalous week in weeks 1\u20133 can materially distort the apparent trend direction.",
+      "instrumentation_request": "Backfill historical weekly data to at least 2025-02-17 (13 weeks prior to 2026-04-27 analysis start). Alternatively, re-run analysis when 13 cumulative weeks have been collected.",
+      "analytical_impact": "With 13 weeks: STL decomposition becomes feasible; seasonal component can be estimated and removed before trend analysis; change-point detection methods (PELT, CUSUM) become applicable; slope confidence intervals will narrow substantially."
+    },
+    {
+      "gap": "Same-period prior-year data",
+      "impact": "Medium. Cannot determine whether the A001 fill_rate decline or A003/SKU003 instock underperformance is seasonal vs. structural.",
+      "instrumentation_request": "Include week-matched prior-year records (2025-04-28 through 2025-05-19) in the dataset."
+    },
+    {
+      "gap": "External benchmarks for fill_rate and instock_rate",
+      "impact": "Medium. A001 fill_rate at 0.928 in week 4 and A003/SKU003 instock_rate at 0.656 cannot be assessed against category or channel norms without a reference standard. Severity of the A003/SKU003 underperformance in particular cannot be graded.",
+      "instrumentation_request": "Provide domain context document with metric thresholds (e.g., instock_rate target \u2265 92%, fill_rate target \u2265 95%) for comparison."
+    },
+    {
+      "gap": "Causal event log",
+      "impact": "Medium. Change-point coincidence checks against known events (promotional calendars, distribution changes, supply disruptions) are not possible without an event log. The A003/SKU003 underperformance onset date is unknown.",
+      "instrumentation_request": "Provide an event log with columns: account_id, sku, event_type, effective_date, end_date (nullable)."
+    }
+  ],
+  "findings_summary": [
+    {
+      "finding_id": "TSA-001",
+      "grade": "B",
+      "entity": "A001",
+      "metric": "fill_rate",
+      "pattern": "Monotone decline across all 4 weeks at account level (0.951 \u2192 0.928), statistically significant (slope=-0.0075/week, p=0.013, R\u00b2=0.974). Primary SKU contributor is SKU004 (slope=-0.0153/week, p=0.022, R\u00b2=0.956, cumulative -5.1%). Week-4 value (0.928) has crossed below the dataset-wide p25 (0.935).",
+      "confidence": "medium",
+      "action_required": true,
+      "recommended_investigation": "Root Cause Investigator should examine A001 fill_rate at SKU level \u2014 specifically SKU004 \u2014 across the supply chain path for potential order fulfillment, DC throughput, or replenishment schedule issues."
+    },
+    {
+      "finding_id": "TSA-002",
+      "grade": "B",
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "pattern": "Persistent structural underperformance across all 4 observable weeks (values: 0.641, 0.739, 0.669, 0.656; mean 0.676). Gap vs. population median: -0.251 (-27.1%). No trend within window \u2014 the anomaly is uniformly sustained. Onset predates the dataset.",
+      "confidence": "high",
+      "action_required": true,
+      "recommended_investigation": "Root Cause Investigator should examine A003/SKU003 for distribution gaps, shelf availability, or replenishment failures. The persistence across all 4 weeks rules out a transient event."
+    },
+    {
+      "finding_id": "TSA-003",
+      "grade": "C",
+      "entity": "A001",
+      "metric": "volume",
+      "pattern": "Week-4 volume -12.8% below trailing 3-week median (748 vs. 858). All other accounts are flat or up in week 4. Not a statistically detectable aggregate trend (p=0.913). Flagged as a candidate supporting the A001 holistic picture alongside TSA-001.",
+      "confidence": "low",
+      "action_required": false,
+      "recommended_investigation": "Monitor in next weekly run. If A001 volume remains below trailing median while fill_rate continues to decline, escalate as a combined signal."
+    }
+  ],
+  "caveats": [
+    {
+      "severity": "high",
+      "code": "FOUR_WEEK_WINDOW_ONLY",
+      "message": "All temporal analyses are based on 4 weekly observations. STL decomposition and formal change-point detection are not applicable. OLS slope estimates at n=4 have very wide confidence intervals and high R\u00b2 values by construction. No finding should be treated as a confirmed durable trend \u2014 all signals are preliminary indicators pending additional weeks of data."
+    },
+    {
+      "severity": "high",
+      "code": "NO_SEASONAL_ADJUSTMENT",
+      "message": "Without prior-year data or a multi-month history, seasonal effects cannot be estimated or removed. The A001 fill_rate decline and A003/SKU003 instock underperformance may have seasonal components that are indistinguishable from structural issues given available data."
+    },
+    {
+      "severity": "medium",
+      "code": "SMALL_N_INFLATES_R_SQUARED",
+      "message": "With n=4, R\u00b2 values above 0.7 arise easily from monotone or near-monotone data even when the true relationship is weak. The high R\u00b2 values for A001 fill_rate (0.974) and A001/SKU004 (0.956) are consistent with a real trend but do not independently confirm one. The p-values (0.013, 0.022) are the more conservative evidence."
+    },
+    {
+      "severity": "medium",
+      "code": "A003_SKU003_ONSET_UNKNOWN",
+      "message": "A003/SKU003 instock_rate underperformance is present in week 1 (the earliest observable point). The onset date is unknown; the condition may have persisted for weeks or months prior to the dataset window. Severity and duration cannot be assessed without historical data."
+    },
+    {
+      "severity": "medium",
+      "code": "VOLUME_NULL_IMPUTATION_NOT_APPLIED",
+      "message": "Three volume records are null (A002/SKU002/2026-05-04, A003/SKU003/2026-04-27, A003/SKU001/2026-05-04). These were excluded from all computations. No zero-imputation was applied per Data Profiler guidance."
+    },
+    {
+      "severity": "medium",
+      "code": "SIMPSONS_PARADOX_VOLUME",
+      "message": "Aggregate volume median statistics are dominated by A005 (46.7% of total volume). All temporal volume analysis was stratified by account. Aggregate volume figures are reported only as context; entity-level stratified results are the primary evidence."
+    },
+    {
+      "severity": "low",
+      "code": "ACCOUNT_NOTES_QUARANTINED",
+      "message": "The account_notes column was dropped before any analysis. It contains confirmed prompt-injection content and was not parsed, summarized, or used in any computation."
+    }
+  ],
+  "lineage": {
+    "upstream_artifacts": [
+      "data-profiler v4.3"
+    ],
+    "code_executed": true,
+    "statistics_source": "All numeric values computed via executed Python code on the actual dataset. No statistics were produced by model reasoning.",
+    "resistant_statistics_applied_to": [
+      "volume",
+      "instock_rate"
+    ],
+    "classical_statistics_applied_to": [
+      "acv_weighted_distribution",
+      "fill_rate"
+    ],
+    "prompt_injection_handled": "account_notes column dropped at load time; zero influence on any output"
+  }
+}

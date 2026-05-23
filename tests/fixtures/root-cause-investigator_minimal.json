@@ -1,0 +1,12 @@
+{
+  "anomaly_under_investigation": {
+    "description": "Smoke test \u2014 no anomaly",
+    "scope": "test"
+  },
+  "primary_root_cause": {
+    "causation_vs_correlation": "associational",
+    "explanation": "Smoke test \u2014 no findings investigated."
+  },
+  "analytical_caveats": [],
+  "statistics": []
+}

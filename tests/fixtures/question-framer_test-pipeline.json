@@ -1,0 +1,139 @@
+{
+  "framer_version": "1.0",
+  "run_id": "qf-smoke-test-001",
+  "run_mode": "proactive",
+  "input_mode": "scheduled_prompt",
+  "input_summary": {
+    "raw_question": "What patterns are present in this dataset?",
+    "domain": "sales-and-distribution",
+    "dataset": "data/sample/smoke-test.csv",
+    "row_count": 100,
+    "time_window_detected": "4 weeks",
+    "entities_detected": [
+      "account_id (5)",
+      "sku (5)",
+      "region (5)",
+      "week (4)"
+    ]
+  },
+  "premises_verified": [
+    {
+      "premise": "The question implies patterns exist and are detectable",
+      "status": "unverified_prior_to_analysis",
+      "note": "This is an exploratory framing; patterns are to be discovered, not assumed. A valid null result ('no patterns of business significance found') is a first-class outcome."
+    },
+    {
+      "premise": "Grain is account \u00d7 week \u00d7 sku (one row per combination)",
+      "status": "verified",
+      "evidence": "5 accounts \u00d7 4 weeks \u00d7 5 skus = 100 rows, matching row_count exactly."
+    },
+    {
+      "premise": "Region is an account-level attribute (not an independent dimension)",
+      "status": "likely_true_unconfirmed",
+      "evidence": "distinct_count(region) == distinct_count(account_id) == 5, consistent with a 1-to-1 mapping. To be confirmed by the Data Profiler."
+    }
+  ],
+  "analytical_questions": [
+    "AQ-01: Do any accounts show a volume deviation of more than 10% relative to the cross-account median across the 4-week window, after controlling for SKU mix? [entity: account_id; metric: volume; comparison: individual account median vs. cross-account median; threshold: >10% deviation]",
+    "AQ-02: Do any account\u2013SKU combinations show instock_rate below 90% in any of the 4 weeks, and does this co-vary with fill_rate degradation at the same entity? [entity: account_id \u00d7 sku; metrics: instock_rate, fill_rate; threshold: instock_rate < 0.90 on \u22651 week; fill_rate Spearman r > 0.5]",
+    "AQ-03: Does acv_weighted_distribution vary meaningfully across accounts or SKUs (>10 percentage-point spread), and is that variation correlated with volume differences? [entity: account_id and sku; metric: acv_weighted_distribution; threshold: >10 pp spread; |Spearman r| > 0.4 with volume]",
+    "AQ-04: Are there week-over-week directional changes in volume, instock_rate, or fill_rate across the 4-week window that are consistent across \u22653 of 5 accounts? [entity: all accounts; metrics: volume, instock_rate, fill_rate; threshold: monotonic or step-change pattern in \u22653 accounts W1\u2192W4]",
+    "AQ-05: Are there specific SKUs that appear in the bottom quartile on instock_rate or fill_rate across \u22653 of 5 accounts, suggesting a SKU-level rather than account-level supply issue? [entity: sku; metrics: instock_rate, fill_rate; threshold: bottom-quartile rank on \u22653 accounts]"
+  ],
+  "hypotheses": [
+    {
+      "id": "H-01",
+      "statement": "One or more accounts have persistently lower instock_rate across all 4 weeks relative to the account group median, because of upstream fill_rate degradation at that account, evidenced by instock_rate and fill_rate co-moving below the group median for that account, and refuted if fill_rate for that account is at or above the group median.",
+      "prior_strength": "moderate",
+      "testable_via": "group-comparison on instock_rate and fill_rate by account_id; Spearman correlation between instock_rate and fill_rate within each account",
+      "rationale": "fill_rate \u00d7 instock_rate co-degradation is a canonical supply-to-shelf mechanism; moderate prior because only 4 weeks and 5 accounts limit statistical power."
+    },
+    {
+      "id": "H-02",
+      "statement": "Volume is positively associated with acv_weighted_distribution at the account\u2013SKU level over the 4-week window, because wider distribution directly enables more volume, evidenced by Spearman r > 0.4 between acv_weighted_distribution and volume at the account\u00d7sku grain, and refuted if r \u2264 0.2.",
+      "prior_strength": "strong",
+      "testable_via": "Spearman correlation (acv_weighted_distribution vs. volume) at account\u00d7sku grain",
+      "rationale": "Distribution \u2192 volume is one of the best-established relationships in CPG sales analytics; strong domain prior."
+    },
+    {
+      "id": "H-03",
+      "statement": "There is a week-over-week deterioration in fill_rate across the 4-week window affecting \u22653 accounts, because a common upstream supply disruption or demand spike is reducing case fill, evidenced by a negative fill_rate slope in \u22653 accounts W1\u2192W4, and refuted if no more than 1 account shows a consistent decline.",
+      "prior_strength": "weak",
+      "testable_via": "Kendall's tau slope on fill_rate by account_id across 4 weeks",
+      "rationale": "Weak prior: 4 data points make trend vs. noise indistinguishable at conventional significance levels; directional characterization only."
+    },
+    {
+      "id": "H-04",
+      "statement": "The 3 volume nulls are concentrated in \u22642 account\u2013week cells rather than distributed randomly, because a data pipeline gap for a specific account or week is the most likely source of sparse nulls, evidenced by all 3 nulls sharing \u22642 distinct account\u2013week combinations, and refuted if nulls span \u22654 distinct account\u2013week cells.",
+      "prior_strength": "moderate",
+      "testable_via": "null-concentration analysis: group volume nulls by account_id and week; visual inspection or chi-square",
+      "rationale": "Concentrated nulls signal a pipeline artifact rather than a business event; important to rule out before treating volume gaps as zero-sales."
+    },
+    {
+      "id": "H-05",
+      "statement": "Between-SKU variance in instock_rate exceeds between-account variance, meaning some SKUs are structurally harder to keep in stock everywhere, evidenced by SKU-level eta-squared on instock_rate exceeding account-level eta-squared in a Kruskal-Wallis decomposition, and refuted if between-account variance is larger.",
+      "prior_strength": "moderate",
+      "testable_via": "Kruskal-Wallis on instock_rate by sku and separately by account_id; compare eta-squared equivalents",
+      "rationale": "SKU supply constraints (lead time, MOQ) often drive more instock variability than account execution in CPG; moderate prior because account SLAs can also dominate."
+    }
+  ],
+  "complexity_level": "L3",
+  "complexity_rationale": "The question is open-ended and exploratory, requiring multi-metric pattern detection across accounts, SKUs, and weeks. Findings will include directional and associative claims requiring validation by the Findings Validator. No causal prescription is requested and no downstream decision is stated, so L4 (prescriptive/opportunity) is not warranted.",
+  "pipeline_composition": [
+    "data-retrieval-agent",
+    "data-profiler",
+    "communication-agent"
+  ],
+  "pipeline_composition_notes": {
+    "data-profiler": "Profile completeness (volume 3% null, account_notes 18% null), verify grain (account\u00d7week\u00d7sku = 100 rows), classify distribution shapes for all four numeric metrics to drive resistant-statistics decisions, run null-concentration check for volume (H-04), and confirm region\u2013account 1-to-1 mapping.",
+    "time-series-analyzer": "Week-over-week directional change detection for volume, instock_rate, and fill_rate by account and in aggregate (AQ-04, H-03). With only 4 time points, use Kendall's tau or monotonic direction count; do not apply formal change-point detection at n=4.",
+    "pattern-discoverer": "Cross-account and cross-SKU profiling of instock_rate, fill_rate, and acv_weighted_distribution. Identify bottom-quartile SKUs (AQ-05) and accounts deviating >10% from cross-account median on volume (AQ-01). Apply resistant statistics (median + IQR) given unknown distribution shapes.",
+    "relationship-analyzer": "Spearman correlation: acv_weighted_distribution vs. volume (H-02, AQ-03); instock_rate vs. fill_rate by account (H-01, AQ-02); Kruskal-Wallis variance decomposition of instock_rate by account and sku (H-05). Apply Benjamini-Hochberg FDR correction at q=0.10 across all correlation tests.",
+    "findings-validator": "Grade all candidate findings A\u2013D. Require triangulation across \u22652 lenses (time window, aggregation level, related metric) for any grade-A or grade-B promotion. Cap H-03 at grade-C maximum given n=4 weeks. Confirm no grade-A/B finding rests solely on intra-dataset baseline without caveat.",
+    "communication-agent": "Render action cards for grade-A/B findings only. Aggregate tracking gaps (volume null concentration, account_notes sanitization scope, absence of prior-period baseline) into a single Open Data Gaps section. A null result is a valid output; render as a descriptive summary with zero action cards if no findings pass validation."
+  },
+  "output_mode": "action-card",
+  "investigation_mode": "diagnostic",
+  "data_requirements": {
+    "domain": "sales-and-distribution",
+    "required_columns": [
+      "account_id",
+      "region",
+      "week",
+      "sku",
+      "volume",
+      "instock_rate",
+      "acv_weighted_distribution",
+      "fill_rate"
+    ],
+    "required_grain": "account \u00d7 week \u00d7 sku",
+    "required_time_window": "4 weeks (W1\u2013W4, as available)",
+    "ideal_but_unavailable": [
+      "Prior-period baseline (13-week trailing history) to contextualize whether current 4-week values are normal or anomalous \u2014 significantly limits ability to confirm trend direction claims",
+      "Same-period prior-year data for seasonality controls",
+      "Daily granularity for instock_rate and fill_rate (currently weekly) \u2014 limits detection of mid-week recovery masking chronic stockouts",
+      "Shipment/order event log to root-cause fill_rate degradation",
+      "Account manager attribution to enable owner assignment on action cards",
+      "Promotional calendar and pricing data to rule out event-driven volume and instock anomalies"
+    ],
+    "data_quality_flags": [
+      "volume: 3 nulls (3%) \u2014 concentration pattern unknown, to be determined by Data Profiler (H-04)",
+      "account_notes: 18 nulls (18%) + 11 sanitized values \u2014 free-text field excluded from quantitative analysis; sanitized content may contain operational signals that are now lost",
+      "No prior-period data available \u2014 all baselines must be intra-dataset (cross-account or cross-SKU medians), limiting triangulation lens 4 (multiple comparison baselines)"
+    ]
+  },
+  "success_definition": {
+    "positive_result": "At least one finding achieves grade A or B from the Findings Validator: a pattern (volume deviation, instock/fill degradation, distribution\u2013volume association, or week-over-week trend) that survives \u22652 triangulation lenses, passes multiple-comparison correction, and maps to a specific entity (account or SKU) with enough specificity to support a concrete recommendation.",
+    "null_result": "No pattern survives the Findings Validator at grade B or above \u2014 all candidate findings fall within normal cross-account variation, fail triangulation, or are attributable to data-quality artifacts. Output: a descriptive summary characterizing the distribution of all four metrics with zero action cards. This is a valid and informative outcome, not a failure.",
+    "partial_result": "Some metrics yield actionable findings; others are inconclusive due to the 4-week window or missing baseline. Partial findings are rendered with explicit confidence language and caveats; inconclusive metrics are reported descriptively."
+  },
+  "limitations": [
+    "Only 4 weeks of data: trend and change-point claims are severely power-limited. A 'trend' across 4 points is directional characterization at best, not a statistically defensible trend.",
+    "No external baseline: the only available baselines are intra-dataset (cross-account or cross-SKU). A finding of 'Account X is below average' may reflect scale differences, not underperformance.",
+    "Small entity counts (5 accounts, 5 SKUs): statistical tests have low power; only large effect sizes will survive Benjamini-Hochberg correction.",
+    "Region is likely 1-to-1 with account: region-level analysis is not independent from account-level analysis \u2014 cross-region comparisons duplicate cross-account comparisons.",
+    "account_notes sanitization (11 of 82 non-null values): substance of sanitized notes is unknown; if they contained delivery exceptions or promotional flags, those signals are lost.",
+    "No promotional calendar, pricing, or event data: any volume or instock anomaly could be explained by an unobserved promotion or pricing event. Causal language is inappropriate for any finding in this run."
+  ],
+  "token_budget": 8000
+}

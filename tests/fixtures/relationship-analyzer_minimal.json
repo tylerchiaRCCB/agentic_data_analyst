@@ -1,0 +1,739 @@
+{
+  "agent": "relationship-analyzer",
+  "schema_version": "4.4",
+  "dataset": "smoke-test.csv",
+  "analysis_design": {
+    "question": "Across 100 account \u00d7 SKU \u00d7 week records (5 accounts, 5 SKUs, 4 weeks: 2026-04-27 through 2026-05-18), do any pairs among {volume, instock_rate, acv_weighted_distribution, fill_rate} exhibit a statistically detectable association \u2014 after multiple-comparison correction \u2014 with a practically meaningful effect size (|rho| \u2265 0.10), and if so, are these relationships consistent across accounts, SKUs, and weeks?",
+    "decision_downstream": "Proactive monitoring: identify metric co-movement patterns that should inform account manager outreach or supply-chain investigation, complementing the time-series signals from TSA-001 (A001 fill_rate decline) and TSA-002 (A003/SKU003 instock underperformance).",
+    "data_requirements": {
+      "required_columns": [
+        "volume",
+        "instock_rate",
+        "acv_weighted_distribution",
+        "fill_rate",
+        "account_id",
+        "sku",
+        "week"
+      ],
+      "required_grain": "account_id \u00d7 sku \u00d7 week",
+      "filters_applied": [
+        "account_notes column quarantined and dropped at load \u2014 contains confirmed prompt-injection content; zero influence on any computation",
+        "3 volume nulls excluded from volume-involving correlations (n=97 for those pairs, n=100 for non-volume pairs)"
+      ],
+      "ideal_but_unavailable": "Trailing 13-week baseline; same-period prior-year data; domain context with metric threshold benchmarks. Short window (4 weeks) limits sample size for within-entity stratified tests."
+    },
+    "success_definition": "A successful run either (a) identifies one or more pairwise relationships that survive BH-FDR correction at q=0.10 AND meet the small-effect threshold (|rho| \u2265 0.10), OR (b) concludes that no such relationship exists across the six metric pairs examined \u2014 both are valid outcomes.",
+    "null_result_definition": "No metric pair survives BH correction at q=0.10 with |rho| \u2265 0.10. Finding would be: metric behaviors in this dataset are orthogonal; no co-movement is detectable at this sample size and time window."
+  },
+  "method_selection": {
+    "rationale": "Method selection driven by Data Profiler distribution classifications. Volume (right-skewed, use_resistant_statistics=true) and instock_rate (left-skewed heavy-tail, use_resistant_statistics=true): Spearman rank correlation for all pairs involving these metrics. fill_rate (approximately normal, use_resistant_statistics=false) and acv_weighted_distribution (approximately normal, use_resistant_statistics=false): Pearson used for the fill_rate \u00d7 acv pair (both normal); Spearman used when either variable in the pair is skewed. Group comparisons: Mann-Whitney U for two-group tests involving skewed metrics; Kruskal-Wallis for multi-group tests. All pairwise Spearman correlations computed; Pearson computed as confirmatory for the fill_rate \u00d7 acv pair only.",
+    "multiple_comparison_correction": "Benjamini-Hochberg FDR at q=0.10 applied to all 6 pairwise correlation tests. This is exploratory analysis; BH at q=0.10 is the appropriate default. Bonferroni was not applied (reserved for confirmatory tests).",
+    "resistant_statistics_flag": "Spearman used as default for all pairs involving volume or instock_rate per Profiler guidance."
+  },
+  "pairwise_correlations": [
+    {
+      "pair_id": "C1",
+      "variable_x": "volume",
+      "variable_y": "acv_weighted_distribution",
+      "method": "spearman",
+      "method_rationale": "volume is right-skewed (use_resistant_statistics=true); acv is approximately normal; Spearman used due to skewed variable in pair",
+      "n": 97,
+      "rho": -0.2349,
+      "p_value_raw": 0.0205,
+      "p_value_adj_bh": 0.0672,
+      "significant_after_correction": true,
+      "ci_95": [
+        -0.4149,
+        -0.0372
+      ],
+      "effect_size_label": "small",
+      "shared_variance_pct": 5.5,
+      "direction": "negative",
+      "interpretation": "Accounts with higher volume tend to have lower ACV-weighted distribution, and vice versa. Effect is small (5.5% shared variance). Survives BH correction at q=0.10.",
+      "triangulation": {
+        "by_week": {
+          "2026-04-27": {
+            "rho": -0.2292,
+            "p": 0.2813,
+            "n": 24
+          },
+          "2026-05-04": {
+            "rho": -0.2955,
+            "p": 0.1711,
+            "n": 23
+          },
+          "2026-05-11": {
+            "rho": -0.2677,
+            "p": 0.1957,
+            "n": 25
+          },
+          "2026-05-18": {
+            "rho": -0.1997,
+            "p": 0.3386,
+            "n": 25
+          }
+        },
+        "by_week_verdict": "Direction is consistent across all 4 weeks (rho ranges -0.20 to -0.30), but no individual week reaches significance at n=25. Pattern is directionally robust; magnitude is not extreme in any week.",
+        "excl_a003_sku003_outlier": {
+          "rho": -0.2307,
+          "p": 0.0253,
+          "n": 94,
+          "verdict": "Relationship persists when the instock outlier is excluded \u2014 not an artifact of that entity."
+        },
+        "excl_a005_dominant_volume": {
+          "rho": -0.2155,
+          "p": 0.0598,
+          "n": 77,
+          "verdict": "Relationship attenuates modestly but persists when the highest-volume account (A005, 46.7% of total volume) is excluded. This is meaningful: the negative relationship is not purely an A005 artifact."
+        },
+        "within_account": {
+          "A001": {
+            "rho": 0.0662,
+            "p": 0.7817,
+            "n": 20,
+            "direction": "positive \u2014 diverges"
+          },
+          "A002": {
+            "rho": 0.0263,
+            "p": 0.9148,
+            "n": 19,
+            "direction": "positive \u2014 diverges"
+          },
+          "A003": {
+            "rho": -0.3189,
+            "p": 0.1971,
+            "n": 18,
+            "direction": "negative \u2014 consistent"
+          },
+          "A004": {
+            "rho": -0.2497,
+            "p": 0.2883,
+            "n": 20,
+            "direction": "negative \u2014 consistent"
+          },
+          "A005": {
+            "rho": -0.331,
+            "p": 0.1541,
+            "n": 20,
+            "direction": "negative \u2014 consistent"
+          }
+        },
+        "within_account_verdict": "Within-account, A003/A004/A005 show consistent negative direction; A001/A002 diverge. The cross-dataset signal is driven primarily by between-account variation (high-volume accounts A005/A002 have lower ACV than small-volume accounts A003/A004). Within-account consistency is partial. See caveats.",
+        "within_sku": {
+          "SKU001": {
+            "rho": 0.2456,
+            "p": 0.3108,
+            "n": 19,
+            "direction": "positive \u2014 diverges"
+          },
+          "SKU002": {
+            "rho": -0.4478,
+            "p": 0.0546,
+            "n": 19,
+            "direction": "negative \u2014 consistent, near-significant"
+          },
+          "SKU003": {
+            "rho": -0.2422,
+            "p": 0.3178,
+            "n": 19,
+            "direction": "negative \u2014 consistent"
+          },
+          "SKU004": {
+            "rho": -0.3158,
+            "p": 0.175,
+            "n": 20,
+            "direction": "negative \u2014 consistent"
+          },
+          "SKU005": {
+            "rho": -0.406,
+            "p": 0.0757,
+            "n": 20,
+            "direction": "negative \u2014 consistent, near-significant"
+          }
+        },
+        "account_level_aggregate": {
+          "rho": -0.7,
+          "p": 0.1881,
+          "n": 5,
+          "note": "n=5 accounts \u2014 too small to interpret independently; consistent direction only."
+        },
+        "triangulation_verdict": "Signal survives 3 of 5 lenses: full dataset (BH-corrected), exclusion of dominant volume account (A005), and consistent across most weeks. Weakened by: within-account inconsistency (A001/A002 diverge) and within-SKU inconsistency (SKU001 diverges). The relationship is primarily a between-account structural pattern \u2014 smaller accounts have higher ACV distribution coverage, larger accounts have lower coverage. This is a plausible structural account characteristic rather than a directly actionable signal."
+      },
+      "confounder_note": "Account size is a plausible confounding structural variable: larger accounts may have volume concentration in fewer SKUs/stores while having lower overall distribution reach. The relationship likely reflects account portfolio structure rather than a causal metric co-movement.",
+      "promoted_to_finding": true,
+      "finding_grade": "B",
+      "finding_grade_rationale": "Survives BH correction; small effect; consistent direction across most strata; but between-account structural driver limits actionability."
+    },
+    {
+      "pair_id": "C2",
+      "variable_x": "fill_rate",
+      "variable_y": "acv_weighted_distribution",
+      "method": "spearman",
+      "method_rationale": "Both fill_rate and acv_weighted_distribution are approximately normal per Profiler; Spearman used as primary (consistent with rest of analysis); Pearson used as confirmatory",
+      "n": 100,
+      "rho": 0.2281,
+      "p_value_raw": 0.0224,
+      "p_value_adj_bh": 0.0672,
+      "significant_after_correction": true,
+      "ci_95": [
+        0.0332,
+        0.4063
+      ],
+      "effect_size_label": "small",
+      "shared_variance_pct": 5.2,
+      "direction": "positive",
+      "pearson_confirmation": {
+        "r": 0.214,
+        "p_value_raw": 0.0325,
+        "ci_95": [
+          0.0183,
+          0.3939
+        ],
+        "consistent_with_spearman": true
+      },
+      "interpretation": "Records with higher ACV-weighted distribution tend to have higher fill_rate. Effect is small (5.2% shared variance). Both Spearman and Pearson estimates are consistent. Survives BH correction.",
+      "triangulation": {
+        "by_week": {
+          "2026-04-27": {
+            "rho": 0.026,
+            "p": 0.9019,
+            "n": 25,
+            "direction": "positive but near zero"
+          },
+          "2026-05-04": {
+            "rho": 0.1024,
+            "p": 0.6263,
+            "n": 25,
+            "direction": "positive"
+          },
+          "2026-05-11": {
+            "rho": 0.2959,
+            "p": 0.151,
+            "n": 25,
+            "direction": "positive, moderate"
+          },
+          "2026-05-18": {
+            "rho": 0.4624,
+            "p": 0.0199,
+            "n": 25,
+            "direction": "positive, medium \u2014 significant at week level"
+          }
+        },
+        "by_week_verdict": "IMPORTANT: The relationship strengthens markedly over the 4-week window \u2014 from near zero in week 1 to medium strength in week 4 (rho=0.46, p=0.020). This temporal strengthening is a potential interaction signal. In week 4, A001 (lowest account-level fill_rate: 0.928) also has one of the lower account-level ACV medians (0.802), while A004 and A005 (highest fill_rates: 0.954, 0.958) have higher ACV values. The strengthening may reflect A001's simultaneous fill_rate decline and ACV structure rather than a general rule.",
+        "excl_a001": {
+          "rho": 0.1603,
+          "p": 0.1554,
+          "n": 80,
+          "verdict": "Relationship weakens considerably when A001 is excluded \u2014 suggesting A001's declining fill_rate in the context of its lower ACV distribution is a partial driver of the observed positive association."
+        },
+        "excl_a003_sku003": {
+          "rho": 0.2056,
+          "p": 0.0445,
+          "n": 96,
+          "verdict": "Relationship remains statistically significant; not driven by the instock outlier."
+        },
+        "within_account": {
+          "A001": {
+            "rho": 0.4196,
+            "p": 0.0655,
+            "n": 20,
+            "direction": "positive, near-significant"
+          },
+          "A002": {
+            "rho": 0.0907,
+            "p": 0.7037,
+            "n": 20,
+            "direction": "positive but trivial"
+          },
+          "A003": {
+            "rho": 0.2763,
+            "p": 0.2384,
+            "n": 20,
+            "direction": "positive, small"
+          },
+          "A004": {
+            "rho": 0.3807,
+            "p": 0.0977,
+            "n": 20,
+            "direction": "positive, near-significant"
+          },
+          "A005": {
+            "rho": -0.0519,
+            "p": 0.8278,
+            "n": 20,
+            "direction": "negative \u2014 diverges"
+          }
+        },
+        "within_account_verdict": "Within-account, A001, A003, and A004 show consistent positive direction; A002 near zero; A005 slightly negative. Signal is not uniform across accounts.",
+        "delta_analysis": {
+          "rho_delta_fr_vs_delta_acv": 0.3447,
+          "p": 0.0915,
+          "n": 25,
+          "note": "Change in fill_rate from week 1 to week 4 positively associated with change in ACV (rho=0.34, p=0.09). Directionally consistent with cross-sectional finding but not significant."
+        },
+        "triangulation_verdict": "Signal survives BH correction and is confirmed by Pearson. However, the temporal strengthening pattern raises a confounding hypothesis: the week-4 relationship may be partly driven by A001's declining fill_rate coinciding with its lower ACV structure, not a stable structural fill_rate ~ ACV relationship. Promoted as a grade-B finding with a confounding-hypothesis flag."
+      },
+      "confounder_note": "The fill_rate ~ ACV relationship strengthens over time and weakens when A001 is excluded, suggesting partial confounding by A001's simultaneous fill_rate decline. Causal interpretation is not supported; this is an observed co-movement that warrants monitoring.",
+      "promoted_to_finding": true,
+      "finding_grade": "B",
+      "finding_grade_rationale": "Survives BH correction; both Spearman and Pearson consistent; but temporal strengthening pattern and sensitivity to A001 exclusion reduce confidence in a stable structural relationship."
+    },
+    {
+      "pair_id": "C3",
+      "variable_x": "volume",
+      "variable_y": "instock_rate",
+      "method": "spearman",
+      "n": 97,
+      "rho": 0.0591,
+      "p_value_raw": 0.5654,
+      "p_value_adj_bh": 0.7955,
+      "significant_after_correction": false,
+      "ci_95": [
+        -0.142,
+        0.2555
+      ],
+      "effect_size_label": "trivial",
+      "direction": "positive",
+      "interpretation": "No statistically detectable association between volume and instock_rate. CI is wide, consistent with no relationship.",
+      "promoted_to_finding": false
+    },
+    {
+      "pair_id": "C4",
+      "variable_x": "volume",
+      "variable_y": "fill_rate",
+      "method": "spearman",
+      "n": 97,
+      "rho": 0.0097,
+      "p_value_raw": 0.9251,
+      "p_value_adj_bh": 0.9251,
+      "significant_after_correction": false,
+      "ci_95": [
+        -0.1901,
+        0.2087
+      ],
+      "effect_size_label": "trivial",
+      "direction": "positive",
+      "interpretation": "No association between volume and fill_rate.",
+      "promoted_to_finding": false
+    },
+    {
+      "pair_id": "C5",
+      "variable_x": "instock_rate",
+      "variable_y": "fill_rate",
+      "method": "spearman",
+      "n": 100,
+      "rho": -0.1351,
+      "p_value_raw": 0.1802,
+      "p_value_adj_bh": 0.3604,
+      "significant_after_correction": false,
+      "ci_95": [
+        -0.3229,
+        0.063
+      ],
+      "effect_size_label": "small",
+      "direction": "negative",
+      "confounder_check": "Excluding A003/SKU003 outlier: rho=-0.1310, p=0.2035, n=96. The weak negative direction persists; not driven by the A003/SKU003 extreme. Result: no significant relationship either way.",
+      "interpretation": "The expected positive co-movement between instock_rate and fill_rate is absent. This is a null finding that merits noting: two supply-health metrics that might be expected to co-move do not, within this 4-week window. Possible explanations: (1) fill_rate is supply-side (DC throughput), instock_rate is shelf-side \u2014 they can decouple; (2) A003/SKU003 structural instock underperformance with fill_rate near average could suppress any positive relationship. Neither explanation is testable from these data alone.",
+      "promoted_to_finding": false,
+      "null_finding_note": "Absence of instock_rate ~ fill_rate co-movement is a notable null \u2014 two metrics logically expected to correlate do not. Surfaced as an observation for downstream review."
+    },
+    {
+      "pair_id": "C6",
+      "variable_x": "instock_rate",
+      "variable_y": "acv_weighted_distribution",
+      "method": "spearman",
+      "n": 100,
+      "rho": 0.0441,
+      "p_value_raw": 0.6629,
+      "p_value_adj_bh": 0.7955,
+      "significant_after_correction": false,
+      "ci_95": [
+        -0.1536,
+        0.2385
+      ],
+      "effect_size_label": "trivial",
+      "direction": "positive",
+      "interpretation": "No detectable association between instock_rate and ACV-weighted distribution.",
+      "promoted_to_finding": false
+    }
+  ],
+  "group_differences": [
+    {
+      "comparison_id": "G1",
+      "description": "A003/SKU003 vs all other account-SKU combinations on instock_rate",
+      "metric": "instock_rate",
+      "method": "Mann-Whitney U (one-sided: rest > outlier)",
+      "method_rationale": "instock_rate is left-skewed heavy-tail (use_resistant_statistics=true); MWU is the appropriate non-parametric test; small n=4 for the outlier group",
+      "n_group_1": 96,
+      "n_group_2": 4,
+      "group_1_label": "All other account-SKU combinations",
+      "group_2_label": "A003/SKU003",
+      "group_1_median": 0.9305,
+      "group_2_median": 0.6625,
+      "absolute_gap": -0.268,
+      "relative_gap_pct": -28.8,
+      "U_statistic": 384.0,
+      "p_value": 0.000377,
+      "effect_size_r": 0.3556,
+      "effect_size_label": "medium",
+      "interpretation": "A003/SKU003 instock_rate is 26.8 percentage points below the median of all other account-SKU combinations. The separation is statistically extreme (p=0.0004) with a medium effect size (r=0.36). This quantifies what the Data Profiler and TSA identified as a structural persistent outlier. Every individual A003/SKU003 record (0.641\u20130.739) falls below the minimum of all other records (0.881).",
+      "promoted_to_finding": true,
+      "finding_grade": "A",
+      "finding_grade_rationale": "Effect is unambiguous: A003/SKU003 values are completely non-overlapping with the rest of the dataset (0.641\u20130.739 vs. 0.881\u20130.989). p=0.0004, medium effect size, consistent across all 4 weeks. Confirmed by Profiler and TSA independently. No multiple-comparison correction needed \u2014 this is a pre-specified group comparison based on Profiler outlier identification, not a data-dredged grouping."
+    },
+    {
+      "comparison_id": "G2",
+      "description": "Volume differences across the 5 accounts (Kruskal-Wallis)",
+      "metric": "volume",
+      "method": "Kruskal-Wallis",
+      "method_rationale": "volume is right-skewed; multi-group (5 accounts); KW is the non-parametric equivalent of one-way ANOVA",
+      "n_total": 97,
+      "H_statistic": 90.2266,
+      "p_value": 0.0,
+      "effect_size_label": "large",
+      "group_medians": {
+        "A001": 796.5,
+        "A002": 1317.0,
+        "A003": 429.5,
+        "A004": 256.0,
+        "A005": 2441.0
+      },
+      "interpretation": "Volume is highly differentiated across accounts (H=90.2, p\u22480). Account structure defines volume tier, not SKU mix. A005 is a structurally separate volume tier (median 2,441 vs. next-highest A002 at 1,317). This confirms the Profiler's Simpson's Paradox warning and validates treating accounts as separate volume strata in all analyses.",
+      "promoted_to_finding": true,
+      "finding_grade": "A",
+      "finding_grade_rationale": "Unambiguous structural result. H=90.2 on 97 observations with p\u22480. This is not a new finding per se \u2014 confirmed the Profiler's observation \u2014 but the formal test provides the statistical warrant for mandatory account-level stratification in all volume analyses."
+    },
+    {
+      "comparison_id": "G3",
+      "description": "fill_rate differences across 5 accounts (Kruskal-Wallis)",
+      "metric": "fill_rate",
+      "method": "Kruskal-Wallis",
+      "n_total": 100,
+      "H_statistic": 6.1067,
+      "p_value": 0.1913,
+      "group_medians": {
+        "A001": 0.945,
+        "A002": 0.9505,
+        "A003": 0.9445,
+        "A004": 0.9605,
+        "A005": 0.958
+      },
+      "interpretation": "No statistically significant difference in fill_rate distribution across accounts. Account-level fill_rate medians are tightly clustered (0.944\u20130.961). Note: this is a global test across the full 4-week window; TSA-001 identified A001's fill_rate as declining within the window. The KW test masks within-account temporal dynamics.",
+      "promoted_to_finding": false
+    },
+    {
+      "comparison_id": "G4",
+      "description": "A001 fill_rate OLS trend confirmation (support for TSA-001)",
+      "metric": "fill_rate",
+      "method": "OLS slope on account-week medians, per account",
+      "slopes_per_account": {
+        "A001": {
+          "slope": -0.0075,
+          "p": 0.0131,
+          "r_squared": 0.974,
+          "verdict": "Significant monotone decline \u2014 confirmed"
+        },
+        "A002": {
+          "slope": -0.006,
+          "p": 0.1229,
+          "r_squared": 0.769,
+          "verdict": "Declining direction, not individually significant"
+        },
+        "A003": {
+          "slope": -0.004,
+          "p": 0.5008,
+          "r_squared": 0.249,
+          "verdict": "No significant trend"
+        },
+        "A004": {
+          "slope": -0.0002,
+          "p": 0.9574,
+          "r_squared": 0.002,
+          "verdict": "Flat"
+        },
+        "A005": {
+          "slope": -0.0006,
+          "p": 0.951,
+          "r_squared": 0.002,
+          "verdict": "Flat"
+        }
+      },
+      "interpretation": "A001 is the only account with a statistically significant fill_rate trend (slope=-0.0075/week, p=0.013, R\u00b2=0.974). Note that A002 also shows a declining direction (w4-w1=-0.017), suggesting fill_rate softness may be broader than A001 alone, but A001's decline is uniquely monotone and statistically distinguishable. A001's week4-minus-week1 change (-0.023) is the largest of all accounts (vs. median of others=-0.011). This cross-validates TSA-001.",
+      "promoted_to_finding": false,
+      "note": "Finding already carried by TSA-001; this provides relationship-analysis cross-validation only."
+    }
+  ],
+  "interaction_effects": [
+    {
+      "interaction_id": "I1",
+      "description": "fill_rate ~ acv relationship strengthens over time (weeks 1\u21924)",
+      "status": "hypothesis_flagged_for_investigation",
+      "evidence": {
+        "week1_rho": 0.026,
+        "week2_rho": 0.1024,
+        "week3_rho": 0.2959,
+        "week4_rho": 0.4624,
+        "week4_p": 0.0199
+      },
+      "proposed_moderator": "week (time) or a time-varying account condition such as A001's declining fill_rate intersecting with its lower ACV structure",
+      "alternative_explanation": "The strengthening could be driven by A001's simultaneous fill_rate decline and lower ACV distribution coverage \u2014 a confluence of the TSA-001 trend and the C2 cross-sectional association, not an independent interaction effect.",
+      "note": "Formal interaction-detection skill is deferred to Phase 2. Flagged here as a candidate for the Root Cause Investigator. In MVP, treat as a confounding-hypothesis rather than a confirmed interaction.",
+      "promoted_to_finding": false
+    }
+  ],
+  "significant_correlations": [
+    {
+      "finding_id": "RA-001",
+      "grade": "B",
+      "pair": "volume ~ acv_weighted_distribution",
+      "rho": -0.2349,
+      "p_raw": 0.0205,
+      "p_adj_bh": 0.0672,
+      "ci_95": [
+        -0.4149,
+        -0.0372
+      ],
+      "n": 97,
+      "effect_size": "small",
+      "direction": "negative",
+      "plain_language": "Accounts with higher weekly case volume tend to have lower ACV-weighted distribution scores, and those with lower volume tend to have higher ACV coverage. The relationship is small in magnitude (5.5% shared variance), survives BH correction, and is consistent in direction across most weeks and SKUs. It is primarily a between-account structural pattern rather than a within-account operational signal.",
+      "confidence": "medium",
+      "confidence_rationale": "Survives BH correction (p_adj=0.067) with consistent directional pattern across 4 weeks and most SKUs. However, within-account analyses show inconsistent results (A001 and A002 diverge), and the relationship is largely explained by account-level volume tier structure. Shared variance is only 5.5%, limiting practical weight.",
+      "action_required": false,
+      "action_note": "No direct action warranted from this relationship alone. The finding is a structural account-portfolio characteristic. It should be noted in context when interpreting volume vs. distribution analyses: high-volume accounts have lower ACV coverage, not higher. This is potentially counter-intuitive and worth flagging to account managers for awareness."
+    },
+    {
+      "finding_id": "RA-002",
+      "grade": "B",
+      "pair": "fill_rate ~ acv_weighted_distribution",
+      "rho_spearman": 0.2281,
+      "r_pearson": 0.214,
+      "p_raw": 0.0224,
+      "p_adj_bh": 0.0672,
+      "ci_95_spearman": [
+        0.0332,
+        0.4063
+      ],
+      "ci_95_pearson": [
+        0.0183,
+        0.3939
+      ],
+      "n": 100,
+      "effect_size": "small",
+      "direction": "positive",
+      "plain_language": "Records with higher ACV-weighted distribution are associated with higher fill_rate. Spearman and Pearson estimates are consistent, both surviving BH correction. However, the relationship strengthens markedly over the 4-week window (week1 rho\u22480.03 \u2192 week4 rho=0.46), suggesting the signal may be partly driven by A001's simultaneous fill_rate decline in the context of its lower ACV structure rather than a stable structural rule.",
+      "confidence": "medium",
+      "confidence_rationale": "Survives BH correction; both Spearman and Pearson consistent; delta-level association directionally confirming (rho=0.34, p=0.09). However, the within-account analysis shows A005 diverges and the relationship attenuates when A001 is excluded. Temporal strengthening introduces a confounding hypothesis. Not promoted to grade A due to instability across strata.",
+      "action_required": false,
+      "action_note": "No direct action warranted. The root cause investigator should note this as context for the A001 fill_rate investigation: A001's lower ACV distribution coverage may be contributing to or coinciding with its fill_rate decline.",
+      "confounding_hypothesis": "Relationship may be partially confounded by A001's declining fill_rate combined with A001's below-average ACV structure. Causal interpretation not supported."
+    }
+  ],
+  "group_differences_summary": [
+    {
+      "finding_id": "RA-003",
+      "grade": "A",
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "comparison": "A003/SKU003 (n=4, median=0.663) vs. all other account-SKU combinations (n=96, median=0.931)",
+      "test": "Mann-Whitney U",
+      "U": 384.0,
+      "p_value": 0.000377,
+      "effect_size_r": 0.3556,
+      "effect_size_label": "medium",
+      "absolute_gap": -0.268,
+      "relative_gap_pct": -28.8,
+      "plain_language": "A003/SKU003 instock_rate is 26.8 percentage points below the median of all other account-SKU records, with zero overlap between the A003/SKU003 range (0.641\u20130.739) and the rest of the dataset (0.881\u20130.989). This separation is statistically extreme and constitutes the most prominent group-level signal in the dataset.",
+      "confidence": "high",
+      "action_required": true
+    },
+    {
+      "finding_id": "RA-004",
+      "grade": "A",
+      "entity": "all accounts",
+      "metric": "volume",
+      "comparison": "Volume distribution across 5 accounts (Kruskal-Wallis)",
+      "test": "Kruskal-Wallis",
+      "H_statistic": 90.2266,
+      "p_value": "< 0.0001",
+      "effect_size_label": "large",
+      "account_medians": {
+        "A001": 796.5,
+        "A002": 1317.0,
+        "A003": 429.5,
+        "A004": 256.0,
+        "A005": 2441.0
+      },
+      "plain_language": "Volume is structurally differentiated across accounts with large effect size. This formally validates treating accounts as distinct volume tiers in all downstream analyses. Aggregate volume statistics without account stratification will misrepresent typical account behavior.",
+      "confidence": "high",
+      "action_required": false,
+      "action_note": "Instructs methodology: mandatory account-level stratification for all volume analyses."
+    }
+  ],
+  "null_findings": [
+    {
+      "pair": "volume ~ instock_rate",
+      "rho": 0.0591,
+      "p_raw": 0.5654,
+      "p_adj_bh": 0.7955,
+      "effect_size_label": "trivial",
+      "finding": "No association. Volume and instock_rate are orthogonal in this dataset."
+    },
+    {
+      "pair": "volume ~ fill_rate",
+      "rho": 0.0097,
+      "p_raw": 0.9251,
+      "p_adj_bh": 0.9251,
+      "effect_size_label": "trivial",
+      "finding": "No association. Volume level is unrelated to fill_rate in this dataset."
+    },
+    {
+      "pair": "instock_rate ~ fill_rate",
+      "rho": -0.1351,
+      "p_raw": 0.1802,
+      "p_adj_bh": 0.3604,
+      "effect_size_label": "small",
+      "finding": "No significant association. Two supply-health metrics that might be expected to co-move positively (higher fill leading to higher instock) do not exhibit a detectable positive relationship. The direction is slightly negative, which may reflect shelf-side vs. supply-side decoupling, or may be a noise artifact at n=100 over 4 weeks. Surfaced as a notable null for downstream awareness.",
+      "notable_null": true
+    },
+    {
+      "pair": "instock_rate ~ acv_weighted_distribution",
+      "rho": 0.0441,
+      "p_raw": 0.6629,
+      "p_adj_bh": 0.7955,
+      "effect_size_label": "trivial",
+      "finding": "No association."
+    }
+  ],
+  "findings_summary": [
+    {
+      "finding_id": "RA-003",
+      "grade": "A",
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "pattern": "Group separation: A003/SKU003 median instock_rate of 0.663 vs. rest of dataset median 0.931. Zero record overlap. MWU p=0.0004, r=0.356 (medium effect). Consistent across all 4 weeks. This is the quantitative validation of the structural outlier flagged by the Profiler and TSA.",
+      "confidence": "high",
+      "action_required": true,
+      "recommended_investigation": "Root Cause Investigator should examine A003/SKU003 for distribution gaps, shelf replenishment failures, or planogram issues. The complete separation from all other records and multi-week persistence rules out data error and transient events."
+    },
+    {
+      "finding_id": "RA-004",
+      "grade": "A",
+      "entity": "all accounts",
+      "metric": "volume",
+      "pattern": "Account-level volume distributions are structurally distinct (KW H=90.2, p\u22480). A005 is a separate volume tier (median 2,441) from all other accounts (medians 256\u20131,317). Mandatory stratification flag.",
+      "confidence": "high",
+      "action_required": false
+    },
+    {
+      "finding_id": "RA-001",
+      "grade": "B",
+      "entity": "cross-dataset",
+      "metric": "volume ~ acv_weighted_distribution",
+      "pattern": "Small negative cross-sectional association (rho=-0.235, p_adj=0.067): higher-volume accounts tend to have lower ACV distribution coverage. Primarily a structural between-account pattern. Survives BH correction but small effect (5.5% shared variance) and inconsistent within-account.",
+      "confidence": "medium",
+      "action_required": false
+    },
+    {
+      "finding_id": "RA-002",
+      "grade": "B",
+      "entity": "cross-dataset",
+      "metric": "fill_rate ~ acv_weighted_distribution",
+      "pattern": "Small positive association (Spearman rho=0.228, Pearson r=0.214, p_adj=0.067): higher ACV distribution coverage co-occurs with higher fill_rate. Both estimators agree. Relationship strengthens over the 4-week window (week1 rho=0.03 \u2192 week4 rho=0.46), suggesting possible confounding by A001's declining fill_rate.",
+      "confidence": "medium",
+      "action_required": false
+    }
+  ],
+  "multiple_comparison_correction": {
+    "method": "Benjamini-Hochberg FDR",
+    "q_threshold": 0.1,
+    "n_tests_corrected": 6,
+    "tests_surviving_correction": [
+      "volume~acv_weighted_distribution (p_adj=0.067)",
+      "fill_rate~acv_weighted_distribution (p_adj=0.067)"
+    ],
+    "tests_not_surviving": [
+      "volume~instock_rate (p_adj=0.796)",
+      "volume~fill_rate (p_adj=0.925)",
+      "instock_rate~fill_rate (p_adj=0.360)",
+      "instock_rate~acv (p_adj=0.796)"
+    ],
+    "note": "Group comparisons (G1 A003/SKU003 MWU, G2 KW volume across accounts) were pre-specified from Profiler outlier flags and not included in the pairwise correction pool."
+  },
+  "tracking_gaps": [
+    {
+      "gap": "Trailing 13-week history",
+      "impact": "High. With only 4 weeks, within-account stratified correlations are computed on n=20 observations per account \u2014 low power for detecting moderate relationships. Example: A001 fill_rate ~ acv (n=20) shows rho=0.42 but p=0.066; a 13-week history (n=65) would either confirm or falsify this. All within-account relationships are underpowered.",
+      "instrumentation_request": "Backfill to at least 2025-02-17 (13 weeks prior). Within-account n\u226565 would allow reliable stratified correlation and within-account hypothesis testing."
+    },
+    {
+      "gap": "Causal event log (promotions, distribution changes, supply events)",
+      "impact": "Medium. The negative volume ~ ACV relationship and the time-varying fill_rate ~ ACV relationship cannot be assessed for causal direction without knowing whether ACV changes preceded or followed volume/fill changes. An event log with account_id, sku, event_type, effective_date would enable cross-correlation analysis.",
+      "instrumentation_request": "Provide event log: columns account_id, sku, event_type, effective_date, end_date."
+    },
+    {
+      "gap": "Domain context benchmarks for metric thresholds",
+      "impact": "Medium. Cannot determine whether A003/SKU003's instock_rate of 0.663 represents a severe business problem (e.g., if threshold is \u22650.92) or a moderate one (if threshold is \u22650.85). Effect size (r=0.36, gap of -0.268) is large in distributional terms; severity in business terms is unmeasurable without a reference standard.",
+      "instrumentation_request": "Provide domain context document specifying instock_rate target (e.g., \u226592%), fill_rate target (e.g., \u226595%), and ACV distribution target (e.g., \u226580%)."
+    }
+  ],
+  "caveats": [
+    {
+      "severity": "high",
+      "code": "SMALL_N_WITHIN_ACCOUNT",
+      "message": "Within-account stratified analyses are based on n=18\u201320 observations per account. At this sample size, moderate correlations (|rho| \u2248 0.30\u20130.40) do not reach significance (p\u22480.10\u20130.20). Within-account null results should be interpreted as underpowered inconclusive results, not confirmed negatives."
+    },
+    {
+      "severity": "high",
+      "code": "SHORT_WINDOW_LIMITS_TEMPORAL_INTERPRETATION",
+      "message": "All cross-sectional correlations pool 4 weeks of data. The fill_rate ~ acv relationship strengthening from week 1 (rho=0.03) to week 4 (rho=0.46) is computed on n=25 per week \u2014 results are directional indicators, not stable estimates."
+    },
+    {
+      "severity": "medium",
+      "code": "VOLUME_ACV_BETWEEN_ACCOUNT_CONFOUND",
+      "message": "The volume ~ acv negative relationship (RA-001) is primarily a between-account structural pattern: larger accounts (A005, A002) have lower ACV coverage than smaller accounts (A004, A003). This likely reflects account portfolio structure rather than a within-account operational relationship. Causal interpretation is not supported."
+    },
+    {
+      "severity": "medium",
+      "code": "FILL_RATE_ACV_CONFOUNDING_HYPOTHESIS",
+      "message": "The fill_rate ~ acv relationship (RA-002) strengthens over time and weakens when A001 is excluded. A partial driver may be A001's simultaneous fill_rate decline and lower ACV structure. The relationship may not be stable or generalizable beyond the current 4-week window."
+    },
+    {
+      "severity": "medium",
+      "code": "INSTOCK_FILL_NOTABLE_NULL",
+      "message": "instock_rate and fill_rate show no positive co-movement (rho=-0.135, p=0.18). This is a notable null: two supply-health metrics expected to correlate do not. Either they measure different system layers (shelf vs. DC), the 4-week window is too short to detect the relationship, or there is a genuine structural decoupling. This should not be ignored by the Root Cause Investigator."
+    },
+    {
+      "severity": "low",
+      "code": "ACCOUNT_NOTES_QUARANTINED",
+      "message": "account_notes column dropped at data load. Contains confirmed prompt-injection content. Had zero influence on any computed statistic."
+    },
+    {
+      "severity": "low",
+      "code": "VOLUME_NULLS_EXCLUDED",
+      "message": "Three volume null records excluded from volume-involving correlations (n=97 instead of 100). Per Profiler guidance: these are probable pipeline drops, not true zeros. No imputation applied."
+    }
+  ],
+  "lineage": {
+    "upstream_artifacts": [
+      "data-profiler v4.3",
+      "time-series-analyzer v4.6"
+    ],
+    "code_executed": true,
+    "statistics_source": "All numeric values computed via executed Python code on smoke-test.csv. No statistics were produced by model reasoning.",
+    "resistant_statistics_applied_to": [
+      "volume (Spearman for all pairs)",
+      "instock_rate (Spearman for all pairs; MWU for group comparison)"
+    ],
+    "classical_statistics_applied_to": [
+      "fill_rate \u00d7 acv_weighted_distribution (Pearson, confirmatory; both approximately normal per Profiler)"
+    ],
+    "multiple_comparison_correction_applied": "Benjamini-Hochberg FDR q=0.10 on 6 pairwise correlation tests",
+    "prompt_injection_handled": "account_notes dropped at load; zero influence on any output",
+    "methods_deferred_to_phase_2": [
+      "formal interaction-detection (interaction_effects I1 surfaced as hypothesis only)",
+      "conditional-analysis skill",
+      "multiple-comparison correction for stratified within-account tests"
+    ]
+  }
+}

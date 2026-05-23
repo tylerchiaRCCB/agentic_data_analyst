@@ -1,0 +1,364 @@
+{
+  "agent": "findings-validator",
+  "schema_version": "4.9",
+  "dataset": "smoke-test.csv",
+  "upstream_artifacts_reviewed": [
+    "data-profiler v4.3",
+    "time-series-analyzer v4.6",
+    "relationship-analyzer v4.4"
+  ],
+  "overall_assessment": "7 findings reviewed across TSA and RA artifacts (TSA-001, TSA-002, TSA-003, RA-001, RA-002, RA-003, RA-004). Independent recomputation against smoke-test.csv reproduces every numeric claim within rounding tolerance. Grades held: 2 at A (RA-003, RA-004), 4 at B (TSA-001, TSA-002, RA-001, RA-002), 1 at C (TSA-003). Zero findings filtered. One minor methodological discrepancy on TSA-001's reported CI (upstream narrower than independently computed). Cross-cutting: 4-week window caps all temporal findings below grade A unless effect is unambiguous; RA-003 and RA-004 qualify because they are cross-sectional and structural. Guardrail pairing check returned missing_data for findings without a data-derivable counter-metric because no domain context document was provided; where pairings could be constructed from the data, they were performed and surfaced a dual-concern at A001 (fill_rate decline + week-4 volume dip).",
+  "findings_recomputed": 7,
+  "discrepancies_found": 1,
+  "discrepancy_details": [
+    {
+      "finding_id": "TSA-001",
+      "field": "ci_95 on account-level fill_rate slope",
+      "upstream_value": "[-0.0092, -0.0058]",
+      "validator_value": "[-0.0112, -0.0038]",
+      "tolerance": "outside rounding tolerance",
+      "explanation": "Upstream CI half-width implies a critical value near 2.0; correct t-critical at df=2 is 4.303, giving the wider interval the Validator computed. Point estimate (-0.00750), p-value (0.0131), and R\u00b2 (0.974) reproduce exactly. The finding still surfaces; the corrected CI is added to required_caveats."
+    }
+  ],
+  "reviewed_findings": [
+    {
+      "finding_id": "RA-003",
+      "upstream_grade": "A",
+      "validator_grade": "A",
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "claim": "A003/SKU003 median instock 0.663 vs rest 0.931; MWU U=384, p=0.000377; complete distributional non-overlap (0.641\u20130.739 vs 0.881\u20130.989); persistent across all 4 weeks.",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "Mann-Whitney U appropriate for left-skewed heavy-tail metric per Profiler. n_outlier=4 small but complete non-overlap makes the test conservative. Effect r=0.34 (Validator) vs 0.36 (upstream) \u2014 both medium; minor formula variant explains gap."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "U=384.0, p=0.000377, gap=-0.268, rel_gap=-28.8%, n_outlier=4, n_rest=96",
+        "upstream_value": "U=384.0, p=0.000377, gap=-0.268, rel_gap=-28.8%"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "no_concern",
+        "paired_metric_checked": "fill_rate at A003/SKU003",
+        "result": "fill_rate at A003/SKU003 is 0.940\u20130.976 (median 0.952), identical to population median (0.952). No supply-side trade-off \u2014 issue is shelf-side / replenishment / planogram, not DC throughput."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible_pending_context",
+        "notes": "Pattern structurally consistent with a known operational failure mode (distribution gap, persistent stockout). Severity in business terms not assessable without domain context."
+      },
+      "simpsons_check": {
+        "applied": true,
+        "outcome": "no_reversal",
+        "notes": "Finding already at entity level (A003/SKU003), not an aggregate claim."
+      },
+      "justification": "All four layers pass. Independent recomputation matches exactly. Guardrail check shows fill_rate healthy at the affected entity \u2014 consistent with the finding's framing. Zero distributional overlap. Grade A correct.",
+      "required_caveats": [
+        "Onset date unknown \u2014 present in earliest observable week; may have persisted prior to dataset window.",
+        "Severity (whether 0.66 vs target is moderate or severe) cannot be quantified without a domain context document specifying instock target."
+      ]
+    },
+    {
+      "finding_id": "RA-004",
+      "upstream_grade": "A",
+      "validator_grade": "A",
+      "entity": "all accounts",
+      "metric": "volume",
+      "claim": "Volume distributions differ structurally across accounts. Kruskal-Wallis H=90.23, p\u22480. Medians: A001=796.5, A002=1317, A003=429.5, A004=256, A005=2441.",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "KW is correct non-parametric multi-group test for right-skewed volume. n=97 adequate; null records correctly excluded."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "H=90.2266, p=1.18e-18; all 5 account medians match exactly",
+        "upstream_value": "H=90.2266, p\u22480"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "no_concern",
+        "notes": "Methodological/structural finding, not a performance claim. No counter-metric applies."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible",
+        "notes": "~10x volume range across accounts and a flagship account (A005) at 46.7% of total is plausible CPG structure."
+      },
+      "simpsons_check": {
+        "applied": false,
+        "outcome": "n/a",
+        "notes": "Finding itself is the Simpson's warning."
+      },
+      "justification": "Layers 1, 2, 4 pass cleanly. Layer 3 not applicable. H and all 5 medians reproduce exactly. Grade A correct.",
+      "required_caveats": [
+        "Methodological finding: warrants account-level stratification in all volume analyses but is not itself actionable by an account manager."
+      ]
+    },
+    {
+      "finding_id": "TSA-001",
+      "upstream_grade": "B",
+      "validator_grade": "B",
+      "entity": "A001",
+      "metric": "fill_rate",
+      "claim": "Monotone fill_rate decline at A001 across 4 weeks (0.951 \u2192 0.928); slope=-0.0075/wk, p=0.0131, R\u00b2=0.974; SKU004 primary contributor (slope=-0.0153, p=0.022).",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "OLS on weekly medians is only computable temporal statistic at n=4. fill_rate approximately normal per Profiler; OLS appropriate. Upstream correctly flagged inflated R\u00b2 at n=4 and treated p-value as the more conservative evidence."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "partial_match",
+        "validator_value": "slope=-0.00750, p=0.0131, R\u00b2=0.974, CI_95=[-0.01123, -0.00377]; SKU004 slope=-0.0153, p=0.0224, R\u00b2=0.956",
+        "upstream_value": "slope=-0.0075, p=0.0131, R\u00b2=0.974, CI=[-0.0092,-0.0058]",
+        "notes": "Point estimate, p, R\u00b2, SKU decomposition reproduce exactly. Upstream CI too narrow (likely used z-critical instead of t at df=2). Correct CI is wider but still entirely below zero."
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "dual_concern",
+        "paired_metric_checked": "volume at A001",
+        "result": "A001 week-4 volume = 748 vs trailing-3 pooled median 858 (-12.8%). Not a trade-off \u2014 both fill_rate and volume weakening simultaneously at the same account. Strengthens, not contradicts, the finding."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible_pending_context",
+        "notes": "Magnitude (~2.4% over 4 weeks) consistent with operational issues. Absolute level (0.928) cannot be benchmarked without domain target."
+      },
+      "simpsons_check": {
+        "applied": true,
+        "outcome": "no_reversal_partial_concentration",
+        "notes": "SKU-level decomposition shows SKU004 primary driver, SKU001 directionally consistent, SKU002/SKU003 diverge. Concentration, not reversal \u2014 honestly described upstream."
+      },
+      "justification": "Layer 1 passes. Layer 2 partial \u2014 CI miscalculation but point estimate and significance reproduce. Layer 3 reveals dual concern at A001 (volume also down). Layer 4 plausible. CI issue is methodological; signal direction and significance hold. Grade B correct \u2014 held below A by n=4, no seasonal adjustment, and CI precision issue.",
+      "required_caveats": [
+        "Corrected 95% CI for the weekly slope is [-0.0112, -0.0038]; upstream's narrower interval used an incorrect critical value at df=2. Direction and significance unchanged.",
+        "Signal rests on 4 observations; a single non-conforming week-5 observation could falsify the trend.",
+        "No prior-year or extended baseline available; cannot distinguish structural from seasonal decline.",
+        "Dual concern: A001 week-4 volume is also -12.8% below trailing baseline. Investigate A001 holistically, not fill_rate in isolation."
+      ]
+    },
+    {
+      "finding_id": "TSA-002",
+      "upstream_grade": "B",
+      "validator_grade": "B",
+      "entity": "A003/SKU003",
+      "metric": "instock_rate",
+      "claim": "Persistent structural underperformance across all 4 weeks; values 0.641, 0.739, 0.669, 0.656; mean 0.676; gap vs population -27.1%; within-window slope not significant (p=0.926).",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "Resistant statistics and within-window slope appropriate. Substantively overlaps with RA-003."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "values [0.641,0.739,0.669,0.656], mean=0.676, slope=-0.00253, p=0.926",
+        "upstream_value": "same"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "no_concern",
+        "notes": "Per RA-003 \u2014 fill_rate at A003/SKU003 normal."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible_pending_context"
+      },
+      "simpsons_check": {
+        "applied": false,
+        "outcome": "n/a"
+      },
+      "justification": "All values reproduce exactly. Substantively identical to RA-003. Communication Agent should consolidate.",
+      "required_caveats": [
+        "Substantively identical to RA-003; render as a single action card.",
+        "Onset date unknown \u2014 predates observable window."
+      ]
+    },
+    {
+      "finding_id": "TSA-003",
+      "upstream_grade": "C",
+      "validator_grade": "C",
+      "entity": "A001",
+      "metric": "volume",
+      "claim": "A001 week-4 volume -12.8% vs trailing 3-wk pooled median (748 vs 858); aggregate-level temporal trend not significant (p=0.913). Surfaced as supporting context, not standalone signal.",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "Upstream explicitly states the trend is NOT significant and frames week-4 dip as candidate. Honest framing."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "A001 trailing-3 pooled median=858, week-4 median=748, pct=-12.82%; aggregate slope -6.5/wk, p=0.913, R\u00b2=0.008",
+        "upstream_value": "same"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "dual_concern",
+        "paired_metric_checked": "fill_rate at A001 week 4",
+        "result": "A001 week-4 fill_rate=0.928 (down from 0.951); not a trade-off \u2014 dual concern."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible",
+        "notes": "Single-week 13% dip at one account is within normal short-window variability; can be noise or early demand signal."
+      },
+      "simpsons_check": {
+        "applied": true,
+        "outcome": "no_reversal",
+        "notes": "Aggregate week-4 -13.9% decomposes to A001 -12.8% with all others flat-to-up; upstream stratified honestly."
+      },
+      "justification": "Grade C is honest \u2014 upstream avoided promoting a non-significant signal. Should appear in descriptive summary, not as an action card. Value is purely as triangulating context for TSA-001.",
+      "required_caveats": [
+        "Volume trend NOT statistically significant (p=0.913). Treat only as supporting context for TSA-001.",
+        "Single-week dip in a 4-week series indistinguishable from noise on its own."
+      ]
+    },
+    {
+      "finding_id": "RA-001",
+      "upstream_grade": "B",
+      "validator_grade": "B",
+      "entity": "cross-dataset",
+      "metric": "volume ~ acv_weighted_distribution",
+      "claim": "Spearman rho=-0.235, p=0.0205, p_adj_BH=0.067, n=97. Small negative cross-sectional association; primarily a between-account structural pattern.",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "Spearman correct given right-skewed volume. BH-FDR q=0.10 across 6 pairs appropriate for exploratory analysis. 5.5% shared variance honestly characterized as small."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "rho=-0.2349, p=0.0205, p_adj_BH=0.0673, n=97; excl A005 rho=-0.2155, p=0.0598, n=77",
+        "upstream_value": "rho=-0.2349, p=0.0205, p_adj=0.0672, n=97"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "missing_data",
+        "notes": "No domain pairing for ACV defined; cross-sectional structural relationship, not a performance claim."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible",
+        "notes": "Larger accounts having lower ACV coverage is plausible. Account medians corroborate (A005 vol=2441/acv=0.79; A004 vol=256/acv=0.87)."
+      },
+      "simpsons_check": {
+        "applied": true,
+        "outcome": "between_vs_within_disagreement_already_disclosed",
+        "notes": "Within-account A001/A002 positive, A003/A004/A005 negative; aggregate is between-account. Upstream restated at correct level \u2014 not a hidden reversal."
+      },
+      "justification": "Numbers reproduce exactly. Effect small but real after BH. Upstream's framing as structural-not-actionable is appropriate. Held at B; small effect and within-account inconsistency block grade A.",
+      "required_caveats": [
+        "Primarily between-account structural; within-account direction inconsistent (A001, A002 diverge). Not actionable as a 'lever' \u2014 describes portfolio structure.",
+        "Causal interpretation not supported."
+      ]
+    },
+    {
+      "finding_id": "RA-002",
+      "upstream_grade": "B",
+      "validator_grade": "B",
+      "entity": "cross-dataset",
+      "metric": "fill_rate ~ acv_weighted_distribution",
+      "claim": "Spearman rho=0.228, Pearson r=0.214, p_adj_BH=0.067, n=100. Small positive association strengthening over the 4-week window (w1 rho=0.03 \u2192 w4 rho=0.46).",
+      "layer1_statistical_rigor": {
+        "test_appropriate": true,
+        "notes": "Spearman primary, Pearson confirmatory (both approximately normal). BH-FDR applied. Within-week n=25 supports descriptive observation only."
+      },
+      "layer2_independent_recomputation": {
+        "outcome": "match",
+        "validator_value": "Spearman rho=0.2281, p=0.0224, n=100; Pearson r=0.214, p=0.0325; w4 rho=0.4624, p=0.0199; excl A001 rho=0.1603, p=0.1554",
+        "upstream_value": "matches exactly"
+      },
+      "layer3_guardrail_pairing": {
+        "outcome": "missing_data",
+        "notes": "No domain pairing defined; structural cross-sectional finding."
+      },
+      "layer4_domain_plausibility": {
+        "outcome": "plausible_with_confounding_hypothesis",
+        "notes": "Co-occurrence of higher ACV with higher fill_rate plausible. Upstream correctly flagged A001-exclusion attenuates relationship and temporal strengthening may reflect A001's simultaneous fill decline \u2014 confounding disclosed."
+      },
+      "simpsons_check": {
+        "applied": true,
+        "outcome": "partial_within_account_consistency",
+        "notes": "A001/A003/A004 positive within-account, A002 \u22480, A005 slightly negative. Not a reversal; not uniform either. Upstream disclosed."
+      },
+      "justification": "Numbers reproduce exactly including temporal strengthening, Pearson confirmation, A001-sensitivity. Confounding-hypothesis flag is the correct treatment. Grade B correct; A would require uniform within-account confirmation.",
+      "required_caveats": [
+        "Relationship strengthens over the 4-week window and attenuates when A001 is excluded \u2014 partial confounding by A001's simultaneous fill_rate decline. Causal interpretation not supported.",
+        "May not generalize beyond the current 4-week window."
+      ]
+    }
+  ],
+  "cross_cutting_issues": [
+    {
+      "issue": "Short baseline window caps confidence across all temporal findings",
+      "affected_findings": [
+        "TSA-001",
+        "TSA-002",
+        "TSA-003",
+        "RA-002"
+      ],
+      "description": "All temporal claims rest on 4 weekly observations. STL, change-point detection, and seasonal adjustment not computable. High R\u00b2 at n=4 arises trivially. No temporal slope finding can be graded A on this dataset alone.",
+      "recommended_caveat_for_recipient": "All trend findings are preliminary indicators pending additional weeks. Re-run when \u226513 cumulative weeks are available before treating any slope as durable."
+    },
+    {
+      "issue": "No domain context document \u2014 guardrail pairings unspecified, severity un-graded",
+      "affected_findings": [
+        "TSA-001",
+        "TSA-002",
+        "RA-001",
+        "RA-002",
+        "RA-003"
+      ],
+      "description": "Without domain context, primary/counter pairings cannot be enforced systematically and absolute metric levels cannot be benchmarked against operational targets. Layer-3 returned missing_data for findings without a data-derivable counter-metric. Where pairings could be constructed (TSA-001 paired with A001 volume; RA-003 paired with A003/SKU003 fill_rate), they were performed.",
+      "recommended_caveat_for_recipient": "Severity (is this level acceptable?) cannot be assessed without domain targets. Findings describe statistical deviations, not graded business impact."
+    },
+    {
+      "issue": "Account A001 has multiple simultaneous concerns",
+      "affected_findings": [
+        "TSA-001",
+        "TSA-003",
+        "RA-002"
+      ],
+      "description": "A001 fill_rate declining (significant), A001 week-4 volume -12.8% (not significant), and A001's profile partially drives the fill~ACV relationship. Communication Agent should consolidate A001 into a single integrated card.",
+      "recommended_caveat_for_recipient": "Render A001 as a single holistic review, not three overlapping items."
+    },
+    {
+      "issue": "TSA-002 and RA-003 describe the same finding",
+      "affected_findings": [
+        "TSA-002",
+        "RA-003"
+      ],
+      "description": "Both describe A003/SKU003's persistent instock underperformance. RA-003 provides the formal group test (MWU); TSA-002 provides the temporal-persistence characterization. Should render as one consolidated card.",
+      "recommended_caveat_for_recipient": "Single action card on A003/SKU003 instock; cite both cross-sectional and temporal evidence inline."
+    }
+  ],
+  "filtered_findings": [],
+  "grade_distribution": {
+    "A": 2,
+    "B": 4,
+    "C": 1,
+    "D": 0,
+    "F": 0
+  },
+  "caveats": [
+    {
+      "severity": "high",
+      "code": "FOUR_WEEK_WINDOW_CAPS_GRADES",
+      "message": "No temporal finding promoted to grade A; all rest on n=4 weekly observations. Highest-confidence findings (A) are the two cross-sectional structural ones (RA-003 entity-level instock gap; RA-004 account-level volume stratification)."
+    },
+    {
+      "severity": "high",
+      "code": "NO_DOMAIN_CONTEXT",
+      "message": "Layer-3 guardrail pairing coverage reduced. Functional-domain pairings not specified; pairings constructed from data structure where possible. Severity benchmarking not possible."
+    },
+    {
+      "severity": "medium",
+      "code": "CI_DISCREPANCY_TSA001",
+      "message": "TSA-001's reported 95% CI for the A001 fill_rate slope was narrower than independently computed (upstream [-0.0092,-0.0058]; Validator [-0.0112,-0.0038]). Likely t-critical miscalculation at df=2. Finding direction and significance unchanged; the wider CI is authoritative."
+    },
+    {
+      "severity": "low",
+      "code": "PROMPT_INJECTION_CONFIRMED_QUARANTINED",
+      "message": "Validator independently confirmed 11 rows of prompt-injection content in account_notes. Column correctly dropped at load by upstream agents; zero influence on any computation."
+    }
+  ],
+  "revalidation_summary": {
+    "findings_recomputed": 7,
+    "exact_matches": 6,
+    "partial_matches": 1,
+    "mismatches": 0,
+    "unable_to_compute": 0,
+    "notes": "TSA-001 classified as partial_match due to CI half-width discrepancy only; point estimate, p-value, R\u00b2, and SKU-level decomposition reproduce exactly."
+  },
+  "lineage": {
+    "upstream_artifacts": [
+      "data-profiler v4.3",
+      "time-series-analyzer v4.6",
+      "relationship-analyzer v4.4"
+    ],
+    "code_executed": true,
+    "statistics_source": "All Validator statistics computed via independent executed Python on smoke-test.csv. account_notes column dropped at load."
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "dataset_handle": "smoke-test",
+  "data_source_type": "uploaded_file",
+  "source_reference": "data/sample/smoke-test.csv",
+  "row_count": 100,
+  "schema": [
+    {
+      "name": "account_id",
+      "dtype": "string",
+      "nullable": false
+    },
+    {
+      "name": "instock_pct",
+      "dtype": "float",
+      "nullable": true
+    }
+  ],
+  "column_metadata": [
+    {
+      "name": "account_id",
+      "dtype": "string",
+      "null_count": 0,
+      "distinct_count": 40,
+      "is_free_text": false
+    },
+    {
+      "name": "instock_pct",
+      "dtype": "float",
+      "null_count": 2,
+      "distinct_count": 87,
+      "is_free_text": false
+    }
+  ],
+  "free_text_columns_sanitized": [],
+  "load_warnings": []
+}

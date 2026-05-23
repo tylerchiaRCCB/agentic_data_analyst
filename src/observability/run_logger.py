@@ -70,30 +70,35 @@ class RunLogger:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "artifacts").mkdir(exist_ok=True)
 
-        # Python logger setup — JSON to run.jsonl, human-readable to stdout + run.log mirror
+        # Python logger setup — JSON to run.jsonl, human-readable to stdout + run.log mirror.
+        # `logging.getLogger(name)` returns a singleton, so any handlers attached to a
+        # prior RunLogger with the same name persist. Close and remove them before
+        # adding fresh ones pointing at this run's directory.
         self._logger = logging.getLogger(f"run.{run_id}")
         self._logger.setLevel(logging.INFO)
-        # Avoid duplicate handlers if RunLogger is constructed twice for the same id
-        if not self._logger.handlers:
-            # 1) JSONL file — structured, machine-parseable
-            jsonl_handler = logging.FileHandler(self.run_dir / "run.jsonl", encoding="utf-8")
-            jsonl_handler.setFormatter(_JSONLineFormatter(run_id))
-            self._logger.addHandler(jsonl_handler)
+        for h in list(self._logger.handlers):
+            h.close()
+            self._logger.removeHandler(h)
 
-            # 2) Human-readable text mirror — same content, more readable for tail -f
-            text_handler = logging.FileHandler(self.run_dir / "run.log", encoding="utf-8")
-            text_handler.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s %(levelname)s %(message)s",
-                    datefmt="%Y-%m-%dT%H:%M:%SZ",
-                )
+        # 1) JSONL file — structured, machine-parseable
+        jsonl_handler = logging.FileHandler(self.run_dir / "run.jsonl", encoding="utf-8")
+        jsonl_handler.setFormatter(_JSONLineFormatter(run_id))
+        self._logger.addHandler(jsonl_handler)
+
+        # 2) Human-readable text mirror — same content, more readable for tail -f
+        text_handler = logging.FileHandler(self.run_dir / "run.log", encoding="utf-8")
+        text_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s %(message)s",
+                datefmt="%Y-%m-%dT%H:%M:%SZ",
             )
-            self._logger.addHandler(text_handler)
+        )
+        self._logger.addHandler(text_handler)
 
-            # 3) Stdout — human-readable for live runs
-            stdout_handler = logging.StreamHandler(sys.stdout)
-            stdout_handler.setFormatter(logging.Formatter("%(message)s"))
-            self._logger.addHandler(stdout_handler)
+        # 3) Stdout — human-readable for live runs
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setFormatter(logging.Formatter("%(message)s"))
+        self._logger.addHandler(stdout_handler)
 
     # ---------- General logging ----------
 

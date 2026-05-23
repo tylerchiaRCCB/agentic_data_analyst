@@ -1,0 +1,16 @@
+{
+  "output_mode": "descriptive-summary",
+  "rendered_output_markdown": "# Smoke Test Report\n\n## Weekly Summary\n\nNothing rose to action level this period. Smoke test only.",
+  "action_cards": [],
+  "descriptive_summary": {
+    "conclusion": "All clear; smoke test only.",
+    "what_was_examined": [
+      "data quality"
+    ],
+    "key_observations": [],
+    "what_would_have_constituted_a_finding": []
+  },
+  "carried_caveats": [],
+  "follow_up_suggestions": [],
+  "visualization_recommendations": []
+}
