@@ -1,0 +1,159 @@
+# EXAMPLE semantic model — Walmart In-Store Execution
+#
+# This is a SCAFFOLD for the team's BI + business stakeholders to fill in.
+# Do NOT treat the metric definitions, thresholds, or guardrail pairings
+# below as authoritative — they are placeholders to make the file shape
+# concrete. The real values come from the Walmart JBP, the BI metric
+# dictionary, and conversations with the Walmart Sales Execution team.
+#
+# When the production version is authored, rename to walmart_in_store_execution.yaml
+# (drop the .example.).
+
+name: walmart_in_store_execution
+description: |
+  Walmart In-Store Execution — measures how well our products perform at
+  the shelf, with the digital order assembly flow (OGP / pickup), and the
+  retailer's first-time pick rate. Updated daily from the Retail Link
+  export. Owned by Walmart Sales Execution.
+
+tables:
+  - name: WALMART_IN_STORE_EXECUTION_FACT
+    description: Fact table at SKU × Account × Week grain.
+    base_table:
+      database: ANALYTICS
+      schema: WALMART
+      table: IN_STORE_EXECUTION_FACT
+
+    dimensions:
+      - name: account_id
+        description: Walmart store identifier
+        expr: account_id
+        data_type: STRING
+        synonyms: [store_id, walmart_store, store_number]
+
+      - name: account_manager
+        description: Internal AM who owns this account
+        expr: account_manager
+        data_type: STRING
+        synonyms: [AM, rep, account_rep]
+
+      - name: region
+        description: Walmart region (NE, SE, MW, W, etc.)
+        expr: region
+        data_type: STRING
+
+      - name: store_format
+        description: Walmart store format
+        expr: store_format
+        data_type: STRING
+        sample_values: [Supercenter, Neighborhood Market, Walmart Plus]
+
+      - name: sku_id
+        description: Internal SKU identifier
+        expr: sku_id
+        data_type: STRING
+
+      - name: category
+        description: Product category
+        expr: category
+        data_type: STRING
+
+    time_dimensions:
+      - name: fiscal_week
+        description: Walmart fiscal week (Sat-Fri)
+        expr: fiscal_week_start
+        data_type: DATE
+
+    measures:
+      - name: instock_pct
+        description: Percent of store-hours the SKU was in-stock that week
+        expr: AVG(instock_pct)
+        data_type: NUMBER
+        default_aggregation: avg
+        synonyms: [in_stock, in_stock_rate, instock_rate]
+
+      - name: ftpr_pct
+        description: First-Time Pick Rate — % of pick attempts that succeeded
+        expr: AVG(ftpr_pct)
+        data_type: NUMBER
+        default_aggregation: avg
+        synonyms: [first_time_pick, pick_success]
+
+      - name: nil_pick_rate
+        description: Rate of online orders that could not be filled at the store
+        expr: AVG(nil_pick_rate)
+        data_type: NUMBER
+        default_aggregation: avg
+
+      - name: shelf_compliance_pct
+        description: Audit-based shelf compliance percent
+        expr: AVG(shelf_compliance_pct)
+        data_type: NUMBER
+        default_aggregation: avg
+
+      - name: weekly_units
+        description: Units sold at this account × SKU × week
+        expr: SUM(units_sold)
+        data_type: NUMBER
+        default_aggregation: sum
+
+guardrail_metric_pairings:
+  - primary: instock_pct
+    counter: days_of_supply
+    rationale: |
+      Instock improvements can come from overstocking. Pair with DOS to
+      see whether the gain came with a carrying-cost penalty.
+  - primary: weekly_units
+    counter: gross_margin_per_unit
+    rationale: |
+      Volume gains often come with promotional discounting that compresses
+      margin. Surface the margin impact alongside any volume finding.
+  - primary: shelf_compliance_pct
+    counter: ftpr_pct
+    rationale: |
+      Shelf compliance and FTPR should move together; divergence indicates
+      either a fixture issue (shelf right, picker can't access) or a back-
+      room execution issue (picker has it, shelf doesn't).
+
+thresholds:
+  instock_pct:
+    concern_level: 0.85
+    target_level: 0.95
+    units: percent
+    source: PLACEHOLDER — confirm with Walmart JBP doc
+  ftpr_pct:
+    concern_level: 0.88
+    target_level: 0.94
+    units: percent
+    source: PLACEHOLDER — confirm with Walmart Sales Execution team
+  nil_pick_rate:
+    concern_level: 0.05
+    target_level: 0.02
+    units: rate
+    source: PLACEHOLDER
+
+known_data_quirks:
+  - description: |
+      fiscal_week reflects Walmart's Sat-Fri fiscal calendar, not the standard
+      Mon-Sun calendar week. Date joins to other internal sources must align.
+  - description: |
+      Holiday weeks (Thanksgiving, Christmas, July 4) have abnormal patterns;
+      year-over-year comparisons should use Walmart-fiscal-calendar-aligned
+      prior year, not calendar-aligned.
+
+stakeholder_map:
+  - role: Walmart Account Manager
+    tier: IC
+    typical_questions:
+      - "What's my weekly performance across my accounts?"
+      - "Which SKUs at which accounts are flagging?"
+  - role: Regional Walmart Lead
+    tier: Manager
+    typical_questions:
+      - "What patterns are emerging across the AMs in my region?"
+      - "Is this an isolated account issue or a regional pattern?"
+  - role: VP Walmart / Sales Execution
+    tier: Executive
+    typical_questions:
+      - "What's the org-wide picture of Walmart execution this period?"
+      - "Where should we be reweighting resources?"

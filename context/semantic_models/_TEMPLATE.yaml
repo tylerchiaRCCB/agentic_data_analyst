@@ -1,0 +1,114 @@
+# Cortex Analyst Semantic Model — TEMPLATE
+#
+# Copy this file to context/semantic_models/<domain>.yaml and fill in for
+# each business domain (e.g. walmart_ogp, supply_chain, production_operations,
+# trade_marketing, commercial_sales, finance).
+#
+# This file follows Snowflake Cortex Analyst's semantic model spec. See:
+#   https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst-semantic-model-reference
+#
+# Authorship: BI / Data Engineering owns this file. Business stakeholders
+# sign off on the metric definitions, guardrail pairings, and business
+# meanings. Versioned in git; PRs reviewed by BI + Business + this team
+# before merge.
+#
+# Example domains: walmart_in_store_execution, supply_chain,
+# production_operations, trade_marketing, commercial_sales, finance.
+#
+# Maintenance cadence: review quarterly; update when source tables change,
+# when business definitions evolve (e.g. FTPR threshold changes from 88% to
+# 85%), or when new metrics need to be supported.
+
+name: <domain_name>
+description: |
+  One paragraph describing what this domain covers and which business
+  function owns it. E.g. "Walmart In-Store Execution performance —
+  nil-pick rate, FTPR (First-Time Pick Rate), instock %, shelf
+  compliance. Owned by the Walmart Sales Execution team. Updated daily
+  from the Retail Link export."
+
+tables:
+  - name: <fully qualified table name, e.g. ANALYTICS.WALMART_OGP_FACT>
+    description: One-line description of the table.
+    base_table:
+      database: <database>
+      schema: <schema>
+      table: <table>
+
+    # Dimensions are the columns analysts slice and filter by.
+    dimensions:
+      - name: <column_name>
+        description: <business meaning>
+        expr: <SQL expression — usually just the column name>
+        data_type: <STRING | INTEGER | DATE | TIMESTAMP_NTZ | ...>
+        synonyms:
+          - <alternative term business users say for this column>
+          - <another synonym>
+        sample_values:
+          - <value 1>
+          - <value 2>
+
+    # Time dimensions get special treatment for time-based analysis.
+    time_dimensions:
+      - name: <date column>
+        description: <business meaning>
+        expr: <SQL expression>
+        data_type: DATE | TIMESTAMP_NTZ
+        synonyms:
+          - <synonym>
+
+    # Measures are the aggregated metrics analysts care about.
+    measures:
+      - name: <metric name, e.g. instock_pct>
+        description: <business meaning — what does this measure?>
+        expr: <SQL aggregation expression, e.g. AVG(instock_pct)>
+        data_type: NUMBER
+        default_aggregation: avg
+        synonyms:
+          - <alternative term>
+
+# Guardrail metric pairings — for the framework's guardrail-pairing-check skill.
+# These pairings are critical: every primary-metric finding gets checked against
+# its paired counter-metric. List the pairings explicitly here so the framework
+# loads them.
+guardrail_metric_pairings:
+  - primary: <metric name>
+    counter: <paired counter-metric>
+    rationale: <why this pairing matters — what trade-off does it surface>
+  - primary: instock_pct
+    counter: days_of_supply
+    rationale: |
+      Instock improvements can be inflated by overstocking. Pair with DOS to
+      surface the inventory-carrying-cost side of the trade-off.
+
+# Domain-specific thresholds the framework treats as known business definitions.
+# Without these, the system falls back to universal effect-size tiers (Cohen's
+# 0.2/0.5/0.8) — much weaker calibration. With them, the analytical agents can
+# anchor practical significance to domain-meaningful magnitudes.
+thresholds:
+  <metric name>:
+    concern_level: <numeric threshold below which we flag>
+    target_level: <business target>
+    units: <"percent" | "days" | "$ per case" | etc.>
+    source: <where this threshold comes from — KPI doc, contract, etc.>
+  instock_pct:
+    concern_level: 0.85
+    target_level: 0.95
+    units: percent
+    source: Walmart Joint Business Plan 2026
+
+# Known data quirks the analytical agents should be aware of.
+known_data_quirks:
+  - description: <e.g. "Weekly grain reflects fiscal week (Sat-Fri), not calendar week.">
+  - description: <e.g. "Rows are present even on stockouts (instock_pct=0); not nulls.">
+
+# Stakeholder map for recipient tier calibration in the Communication Agent.
+stakeholder_map:
+  - role: <e.g. Account Manager>
+    tier: IC
+    typical_questions:
+      - <question type they ask>
+  - role: <e.g. VP Sales>
+    tier: Executive
+    typical_questions:
+      - <question type they ask>
