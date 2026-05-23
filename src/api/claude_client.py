@@ -64,12 +64,29 @@ class ClaudeResponse:
 
 
 class ClaudeClient:
-    """Wrapper around `anthropic.Anthropic`.
+    """Wrapper around `anthropic.Anthropic` — the Anthropic implementation of LLMClient.
 
     Initialization reads `ANTHROPIC_API_KEY` from the environment by default.
     For production, this will be swapped for Azure AI Foundry per
     `orchestration/pipeline-definitions.md` §10's data-flow section.
+
+    Implements the LLMClient protocol in src/api/llm_client.py. Other providers
+    (OpenAI, Gemini) go through LiteLLMClient — Anthropic stays on the native
+    SDK to preserve prompt caching + code execution + Files API economics.
     """
+
+    # LLMClient protocol attributes
+    @property
+    def provider(self) -> str:
+        return "anthropic"
+
+    @property
+    def supports_code_execution(self) -> bool:
+        return True
+
+    @property
+    def supports_prompt_caching(self) -> bool:
+        return True
 
     def __init__(self, api_key: str | None = None, max_retries: int = 5) -> None:
         # The SDK retries internally on transient errors; we add an additional

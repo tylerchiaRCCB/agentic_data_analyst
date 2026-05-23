@@ -13,6 +13,12 @@ dependencies = [
     "pyyaml>=6.0.1",
     "python-dateutil>=2.9.0",
     "python-dotenv>=1.0.0",
+    # LiteLLM gives a unified interface across Anthropic / OpenAI / Google / Azure /
+    # Bedrock / etc. Used only for non-Anthropic providers in our LLMClient
+    # abstraction — Anthropic still goes through the native SDK to preserve
+    # prompt caching + code execution + Files API support, which LiteLLM does
+    # not yet abstract fully. See src/api/llm_client.py for the dispatch.
+    "litellm>=1.50.0",
 ]
 
 [dependency-groups]

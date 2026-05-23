@@ -32,6 +32,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.api.claude_client import ClaudeClient, ClaudeResponse
+from src.api.llm_client import (
+    LLMClient,
+    get_llm_client,
+    parse_model_id,
+    resolve_model_for_call as _resolve_model_for_call,
+)
 from src.observability.run_logger import RunLogger
 from src.observability.tracer import Tracer
 from src.orchestrator.budget_tracker import BudgetExceeded, BudgetTracker
@@ -94,6 +100,10 @@ class PipelineExecutor:
         lineage: LineageTracker,
         domain: str | None = None,
     ) -> None:
+        # `client` is the *primary* / Anthropic-native client. When per-agent
+        # model config selects a non-Anthropic provider (e.g. `openai/gpt-5`),
+        # _client_for_model dispatches via factory; cached so we don't recreate
+        # per-call.
         self.client = client
         self.config = config
         self.run_logger = run_logger
@@ -101,6 +111,20 @@ class PipelineExecutor:
         self.budget = budget
         self.lineage = lineage
         self.domain = domain
+        self._client_cache: dict[str, LLMClient] = {}
+
+    def _client_for_model(self, model: str) -> LLMClient:
+        """Return the LLMClient that handles this model id.
+
+        Anthropic models (bare or prefixed) → the injected self.client.
+        Other providers → cached LiteLLM client via factory.
+        """
+        provider, _ = parse_model_id(model)
+        if provider == "anthropic":
+            return self.client  # type: ignore[return-value]
+        if provider not in self._client_cache:
+            self._client_cache[provider] = get_llm_client(model)
+        return self._client_cache[provider]
 
     # ---------- Question Framer entry point ----------
 
@@ -417,8 +441,14 @@ class PipelineExecutor:
             # mid-stream — both tools are available. The strong prompt-level
             # instruction (in each agent.md) is that the final emit_*_artifact
             # call is required.
-            response: ClaudeResponse = self.client.call(
-                model=model,
+            #
+            # Provider dispatch: when the configured model is prefixed (e.g.
+            # `openai/gpt-5`, `google/gemini-3-pro`), route via the factory so
+            # the right client handles the call. Bare or `anthropic/...` model
+            # names use the injected self.client (the existing primary path).
+            call_client = self._client_for_model(model)
+            response = call_client.call(
+                model=_resolve_model_for_call(model),
                 system=prompt.system_blocks,  # structured form enables prompt caching
                 messages=messages,
                 max_tokens=self.config.max_tokens_per_call,
