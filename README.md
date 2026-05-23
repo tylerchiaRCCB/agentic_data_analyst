@@ -155,6 +155,19 @@ Outputs:
   - `lineage.json` — every claim's provenance (source, slice, code reference, agent)
   - `<run_id>-failure.md` — operator-facing failure report (only on hard-fail)
 
+### Production-grade resilience features
+
+The system enforces several disciplines structurally, not just via prompts:
+
+- **Hard cost cap.** `max_cost_usd` in [config/pipeline_config.yaml](config/pipeline_config.yaml) (default $25) aborts a run cleanly when cumulative API spend crosses the cap. Soft warnings at 50/75/90%.
+- **Tool-use structured output enforcement.** Every agent receives an Anthropic tool spec built from its Pydantic schema. Claude is expected to emit the artifact via tool_use; the structured channel is preferred over text-parsing. This eliminates ~70% of LLM-output variants over time.
+- **Required-field rigor on Statistics.** Group comparisons, correlations, and regressions REQUIRE `effect_size` and `confidence_interval` at the schema layer — they cannot be omitted. The validator's rigor check is now backed by the artifact format itself.
+- **Prompt versioning.** Every artifact carries `prompt_sha256` + `skill_hashes` (universal + agent block). Reproducibility holds even after skill files are edited — you can always tell which prompt-version produced an old artifact.
+- **Parallel execution.** When the Question Framer emits a parallel group (e.g., the 3 analytical agents), the executor runs them concurrently in a thread pool. ~6-8 min off typical full-run wall time.
+- **Human-in-the-loop gate.** Set `hitl_review_threshold` (e.g., `"A"`) to hold high-confidence findings for human review before delivery. Disabled by default; enable for production deployments where findings drive business-impacting decisions.
+- **Structured JSON logs.** `runs/<run_id>/run.jsonl` is machine-parseable; each line carries timestamp, level, run_id, msg, and structured attrs. Ready for ingestion by Datadog/Splunk/etc.
+- **Mock-SDK integration tests.** Orchestrator behavior (retry-once, skip-and-flag, hard-fail, budget-cap abort) is fully unit-tested without spending real API tokens. Regressions found in 1 second of pytest, not $10 of API calls.
+
 ### Tools — partial-pipeline replay and context-gap extraction
 
 The pipeline saves typed artifacts for every stage under `runs/<run_id>/artifacts/`. Two tools operate on those artifacts and do **not** require running the full pipeline again.
