@@ -245,13 +245,35 @@ def main() -> int:
     lineage_path = run_logger.write_lineage(lineage.manifest())
 
     # The Communication Agent's rendered markdown is the recipient-facing output.
-    final_md_path = args.output_dir / f"{run_id}.md"
-    final_md_path.parent.mkdir(parents=True, exist_ok=True)
+    # If a HITL threshold is configured, evaluate whether to gate the output for
+    # human review before it gets delivered.
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     comms_artifact = run.artifacts_by_agent.get("communication-agent")
     if comms_artifact:
-        rendered = comms_artifact["payload"].get("rendered_output_markdown", "")
-        final_md_path.write_text(rendered, encoding="utf-8")
-        run_logger.info("Final output written", path=str(final_md_path))
+        from src.orchestrator.hitl_gate import build_review_prompt, evaluate as hitl_evaluate
+
+        payload = comms_artifact["payload"]
+        rendered = payload.get("rendered_output_markdown", "")
+        decision = hitl_evaluate(
+            run_id=run_id,
+            output_dir=args.output_dir,
+            comms_payload=payload,
+            threshold=cfg.get("hitl_review_threshold"),
+        )
+        decision.final_md_path.write_text(rendered, encoding="utf-8")
+        if decision.gated and decision.review_prompt_path is not None:
+            decision.review_prompt_path.write_text(
+                build_review_prompt(run_id=run_id, decision=decision), encoding="utf-8"
+            )
+            run_logger.warning(
+                "HITL gate triggered — output held for human review",
+                threshold=decision.threshold,
+                findings_for_review=len(decision.findings_triggering_review),
+                pending_path=str(decision.final_md_path),
+                review_prompt=str(decision.review_prompt_path),
+            )
+        else:
+            run_logger.info("Final output written", path=str(decision.final_md_path))
     else:
         run_logger.warning("No Communication Agent artifact found; final output not written.")
 

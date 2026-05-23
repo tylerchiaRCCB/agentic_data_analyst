@@ -69,3 +69,11 @@ max_cost_usd: 25.0
 # cost crosses these, a warning is logged but execution continues. Final
 # threshold (1.0) is the hard abort.
 cost_warning_thresholds: [0.5, 0.75, 0.9]
+
+# Human-in-the-loop gate for high-stakes findings. When set to a confidence
+# grade (e.g., "A", "B"), any action card at or above that grade holds the
+# recipient output for human review — written to <run_id>-pending-review.md
+# alongside a <run_id>-review-prompt.md summary. Set to null to disable.
+# Recommended: enable in production deployments where findings drive
+# business-impacting decisions; leave null for the demo / development workflow.
+hitl_review_threshold: null
