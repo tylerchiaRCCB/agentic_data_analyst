@@ -19,6 +19,7 @@ is proven.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import time
@@ -157,17 +158,18 @@ class PipelineExecutor:
 
         try:
             for i, stage in enumerate(framer.pipeline_composition, start=1):
-                # MVP: process parallel groups sequentially. Parallel execution is a future
-                # extension; the schema accepts the shape.
                 stages_to_run = stage.parallel if hasattr(stage, "parallel") else [stage]
-                for sub_stage in stages_to_run:
-                    result = self._execute_stage(
-                        stage_index=i,
-                        agent=sub_stage.agent,
-                        skills=sub_stage.skills,
-                        upstream_artifacts=dict(run.artifacts_by_agent),
-                        dataset_file_id=dataset_file_id,
-                    )
+                # Snapshot of upstream artifacts at this group's start — every sub-stage
+                # sees the same upstream view. They are independent by spec (otherwise
+                # the framer would not have grouped them).
+                upstream_snapshot = dict(run.artifacts_by_agent)
+                stage_results = self._execute_stage_group(
+                    stage_index=i,
+                    sub_stages=stages_to_run,
+                    upstream_artifacts=upstream_snapshot,
+                    dataset_file_id=dataset_file_id,
+                )
+                for result in stage_results:
                     run.stage_results.append(result)
 
                     if result.status == "ok":
@@ -235,6 +237,79 @@ class PipelineExecutor:
             self._write_failure_report(run, failure_result)
 
         return run
+
+    # ---------- Stage-group execution (handles serial + parallel sub-stages) ----------
+
+    def _execute_stage_group(
+        self,
+        *,
+        stage_index: int,
+        sub_stages: list[Any],
+        upstream_artifacts: dict[str, dict[str, Any]],
+        dataset_file_id: str | None,
+    ) -> list[StageResult]:
+        """Execute one stage of the framer's pipeline_composition.
+
+        A "stage" can be a single agent (serial) or a parallel group of independent
+        agents. For parallel groups, sub-stages run concurrently in a thread pool —
+        their upstream snapshot is identical and they have no dependencies on each
+        other's outputs (the framer guarantees this by construction).
+
+        BudgetExceeded from any sub-stage cancels in-flight siblings and bubbles up.
+        """
+        if len(sub_stages) == 1:
+            return [
+                self._execute_stage(
+                    stage_index=stage_index,
+                    agent=sub_stages[0].agent,
+                    skills=sub_stages[0].skills,
+                    upstream_artifacts=upstream_artifacts,
+                    dataset_file_id=dataset_file_id,
+                )
+            ]
+
+        # Parallel sub-stages
+        max_workers = min(len(sub_stages), 4)
+        self.run_logger.info(
+            "Parallel stage group starting",
+            stage_index=stage_index,
+            agents=[s.agent for s in sub_stages],
+            workers=max_workers,
+        )
+        results: list[StageResult] = [None] * len(sub_stages)  # type: ignore[list-item]
+        budget_error: BudgetExceeded | None = None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_idx = {
+                pool.submit(
+                    self._execute_stage,
+                    stage_index=stage_index,
+                    agent=sub.agent,
+                    skills=sub.skills,
+                    upstream_artifacts=upstream_artifacts,
+                    dataset_file_id=dataset_file_id,
+                ): idx
+                for idx, sub in enumerate(sub_stages)
+            }
+            for fut in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                try:
+                    results[idx] = fut.result()
+                except BudgetExceeded as e:
+                    # Latch the first budget error; cancel the rest. The error
+                    # bubbles up to execute_pipeline's handler after the pool drains.
+                    if budget_error is None:
+                        budget_error = e
+                    # Best-effort cancel of pending futures (those not yet running
+                    # will be cancellable; in-flight ones cannot be).
+                    for other in future_to_idx:
+                        other.cancel()
+                # Other exceptions are returned as StageResult(status="failed") by
+                # _execute_stage already; no need to handle here.
+
+        if budget_error is not None:
+            raise budget_error
+        # Order results by original sub-stage order (we filled by index)
+        return [r for r in results if r is not None]
 
     # ---------- Per-stage execution ----------
 

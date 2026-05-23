@@ -294,3 +294,30 @@ def test_agent_output_tool_generates_valid_anthropic_tool_spec() -> None:
         assert "properties" in schema
         # Pydantic decorations should be stripped:
         assert "title" not in schema  # only at root
+
+
+def test_pipeline_runs_parallel_group(tmp_path: Path) -> None:
+    """A pipeline with a parallel group (data-profiler + pattern-discoverer)
+    runs both sub-stages and ultimately produces a successful run."""
+    parallel_framer = QuestionFramerPayload.model_validate(
+        fixture_payload("question-framer_parallel-pipeline.json")
+    )
+    mock = MockClaudeClient({
+        "data-retrieval-agent": [fixture_text("data-retrieval-agent_minimal.json")],
+        "data-profiler": [fixture_text("data-profiler_minimal.json")],
+        "pattern-discoverer": [fixture_text("pattern-discoverer_minimal.json")],
+        "communication-agent": [fixture_text("communication-agent_minimal.json")],
+    })
+    executor, _ = _make_executor(mock, tmp_path)
+    run = executor.execute_pipeline(parallel_framer)
+
+    assert run.status == "ok"
+    agents_run = [s.agent for s in run.stage_results]
+    # Order within the parallel group is non-deterministic; just assert both ran:
+    assert "data-profiler" in agents_run
+    assert "pattern-discoverer" in agents_run
+    assert "data-retrieval-agent" in agents_run
+    assert "communication-agent" in agents_run
+    # Each agent called exactly once
+    for agent in ("data-profiler", "pattern-discoverer", "data-retrieval-agent", "communication-agent"):
+        assert len([c for c in mock.calls if c["agent"] == agent]) == 1, f"{agent} call count wrong"
