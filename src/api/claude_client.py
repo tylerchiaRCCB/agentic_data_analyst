@@ -46,7 +46,12 @@ CODE_EXECUTION_TOOL: dict[str, str] = {
 
 @dataclass
 class ClaudeResponse:
-    """Container for a Claude API response, with token usage and the raw response."""
+    """Container for a Claude API response, with token usage and the raw response.
+
+    `tool_output` is set when the call was made with an `output_tool` and Claude
+    emitted a tool_use block matching it — that's the structured artifact, used
+    in preference to text parsing. See pipeline_executor's _call_and_validate.
+    """
 
     text: str
     stop_reason: str | None
@@ -55,6 +60,7 @@ class ClaudeResponse:
     cache_read_tokens: int
     cache_write_tokens: int
     raw: Any  # the original SDK response, for inspection / tool-use extraction
+    tool_output: dict[str, Any] | None = None
 
 
 class ClaudeClient:
@@ -102,6 +108,7 @@ class ClaudeClient:
         enable_code_execution: bool = True,
         enable_files_api: bool = True,
         extra_tools: list[dict[str, Any]] | None = None,
+        output_tool: dict[str, Any] | None = None,
         timeout_seconds: float = 900.0,
     ) -> ClaudeResponse:
         """Call Claude with the given system prompt and messages.
@@ -122,6 +129,14 @@ class ClaudeClient:
             tools.append(CODE_EXECUTION_TOOL)
         if extra_tools:
             tools.extend(extra_tools)
+        if output_tool is not None:
+            # The structured-output tool. We do NOT force tool_choice — Claude
+            # is allowed to use code_execution mid-stream and the output_tool
+            # at the end. The strong prompt-level instruction is that the final
+            # emit_*_artifact call is required. Forcing tool_choice would
+            # prevent code_execution; that breaks the whole compute-before-
+            # reasoning discipline.
+            tools.append(output_tool)
 
         betas: list[str] = []
         if enable_code_execution:
@@ -187,11 +202,22 @@ class ClaudeClient:
     @staticmethod
     def _wrap_response(response: Any) -> ClaudeResponse:
         # Extract the final assistant text. We concatenate text blocks; tool-use
-        # blocks (code execution requests) are surfaced via the raw response.
+        # blocks (code execution requests AND structured-output emissions) are
+        # surfaced separately. If a tool_use block matches the convention
+        # `emit_*_artifact`, treat its input dict as the structured output.
         text_parts: list[str] = []
+        tool_output: dict[str, Any] | None = None
         for block in response.content:
-            if getattr(block, "type", None) == "text":
+            btype = getattr(block, "type", None)
+            if btype == "text":
                 text_parts.append(block.text)
+            elif btype == "tool_use":
+                name = getattr(block, "name", "") or ""
+                # Our convention: emit_<agent_underscored>_artifact
+                if name.startswith("emit_") and name.endswith("_artifact"):
+                    tool_input = getattr(block, "input", None)
+                    if isinstance(tool_input, dict):
+                        tool_output = tool_input
 
         usage = response.usage
         return ClaudeResponse(
@@ -202,4 +228,5 @@ class ClaudeClient:
             cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
             cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
             raw=response,
+            tool_output=tool_output,
         )

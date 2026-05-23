@@ -1011,3 +1011,59 @@ def validate_payload(agent: AgentName, raw_payload: dict[str, Any]) -> BaseModel
     """
     cls = PAYLOAD_BY_AGENT[agent]
     return cls.model_validate(raw_payload)
+
+
+def agent_output_tool(agent: AgentName) -> dict[str, Any]:
+    """Build an Anthropic tool definition for an agent's structured output.
+
+    Claude is forced (via tool_use) to emit the artifact payload as a JSON object
+    matching this schema, rather than as free-form text we then JSON-parse. This
+    eliminates the entire variant-detection-then-normalize feedback loop for the
+    fields the schema describes.
+
+    The Pydantic-generated JSON schema is mostly Anthropic-compatible; we strip a
+    handful of keys Anthropic doesn't accept and rebuild $defs references inline
+    where needed.
+
+    Used by ClaudeClient.call() when the executor passes output_tool=<this>.
+    """
+    cls = PAYLOAD_BY_AGENT[agent]
+    schema = cls.model_json_schema()
+    schema = _sanitize_for_anthropic_tool(schema)
+    return {
+        "name": f"emit_{agent.replace('-', '_')}_artifact",
+        "description": (
+            f"Emit your final structured artifact for the {agent} stage. "
+            "Call this tool exactly once, at the conclusion of your analysis, "
+            "with the JSON payload matching the input_schema. "
+            "All numeric claims in the payload must come from prior code_execution results."
+        ),
+        "input_schema": schema,
+    }
+
+
+def _sanitize_for_anthropic_tool(schema: dict[str, Any]) -> dict[str, Any]:
+    """Strip Pydantic-specific JSON Schema keys Anthropic's tool API doesn't honor.
+
+    Concretely:
+    - Drop `title` keys (Pydantic decorates every field; Anthropic ignores them
+      but they bloat the schema and use cache tokens).
+    - Ensure the root has `type: object` (Anthropic expects this).
+    - Leave `$defs` and `$ref` intact — Anthropic resolves them.
+    - Leave `additionalProperties` intact (Anthropic respects it).
+    """
+    if not isinstance(schema, dict):
+        return schema
+    cleaned: dict[str, Any] = {}
+    for k, v in schema.items():
+        if k == "title":
+            continue
+        if isinstance(v, dict):
+            cleaned[k] = _sanitize_for_anthropic_tool(v)
+        elif isinstance(v, list):
+            cleaned[k] = [_sanitize_for_anthropic_tool(item) if isinstance(item, dict) else item for item in v]
+        else:
+            cleaned[k] = v
+    if cleaned.get("type") is None and "$defs" not in cleaned and "properties" in cleaned:
+        cleaned["type"] = "object"
+    return cleaned

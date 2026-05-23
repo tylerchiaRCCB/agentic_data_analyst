@@ -54,6 +54,7 @@ UNIVERSAL_SKILL_NAMES: frozenset[str] = frozenset({
     "close-the-loop",
     "tracking-gaps",
     "resistant-statistics",
+    "structured-output-contract",
 })
 
 

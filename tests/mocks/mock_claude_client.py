@@ -72,6 +72,7 @@ class MockClaudeClient:
         enable_code_execution: bool = True,  # noqa: ARG002
         enable_files_api: bool = True,  # noqa: ARG002
         extra_tools: list[dict[str, Any]] | None = None,  # noqa: ARG002
+        output_tool: dict[str, Any] | None = None,  # noqa: ARG002
         timeout_seconds: float = 900.0,  # noqa: ARG002
     ) -> ClaudeResponse:
         agent = self._detect_agent(system)

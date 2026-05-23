@@ -220,3 +220,77 @@ def test_pipeline_structured_logs_emitted(tmp_path: Path) -> None:
         assert "ts" in obj
         assert "run_id" in obj
         assert "msg" in obj
+
+
+def test_pipeline_prefers_tool_output_over_text(tmp_path: Path) -> None:
+    """When the mock supplies both tool_output and text, the executor uses tool_output.
+
+    This exercises the structured-output enforcement path: Claude emits the artifact
+    via tool_use rather than free-form JSON, and the executor takes that as-is.
+    """
+    from src.api.claude_client import ClaudeResponse
+
+    # Construct a response with tool_output set to a valid artifact, and text set to
+    # garbage. Tool_output should win.
+    valid_artifact = fixture_payload("data-retrieval-agent_minimal.json")
+
+    def make_response_with_tool_output() -> ClaudeResponse:
+        return ClaudeResponse(
+            text="this would fail to parse if used",
+            stop_reason="end_turn",
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+            raw=None,
+            tool_output=valid_artifact,
+        )
+
+    class _PatchedMock(MockClaudeClient):
+        def call(self, **kwargs):  # type: ignore[override]
+            agent = self._detect_agent(kwargs.get("system", []))
+            self.calls.append({"agent": agent, "model": kwargs.get("model", "")})
+            if agent == "data-retrieval-agent":
+                return make_response_with_tool_output()
+            # Other agents: usual queue-based path
+            queue = self._queues.get(agent)
+            nxt = queue.popleft()  # type: ignore[union-attr]
+            return ClaudeResponse(
+                text=nxt if isinstance(nxt, str) else "",
+                stop_reason="end_turn",
+                input_tokens=100, output_tokens=50,
+                cache_read_tokens=0, cache_write_tokens=0,
+                raw=None, tool_output=None,
+            )
+
+    mock = _PatchedMock({
+        "data-profiler": [fixture_text("data-profiler_minimal.json")],
+        "communication-agent": [fixture_text("communication-agent_minimal.json")],
+    })
+    executor, _ = _make_executor(mock, tmp_path)
+    run = executor.execute_pipeline(_short_framer_payload())
+
+    assert run.status == "ok"
+    # Specifically: data-retrieval-agent succeeded despite garbage text — because
+    # tool_output was preferred.
+    retrieval_results = [s for s in run.stage_results if s.agent == "data-retrieval-agent"]
+    assert len(retrieval_results) == 1
+    assert retrieval_results[0].status == "ok"
+
+
+def test_agent_output_tool_generates_valid_anthropic_tool_spec() -> None:
+    """Each agent's output_tool spec has the required Anthropic tool shape."""
+    from src.orchestrator.schemas import PAYLOAD_BY_AGENT, agent_output_tool
+
+    for agent in PAYLOAD_BY_AGENT:
+        tool = agent_output_tool(agent)
+        assert "name" in tool
+        assert tool["name"].startswith("emit_")
+        assert tool["name"].endswith("_artifact")
+        assert "description" in tool
+        assert "input_schema" in tool
+        schema = tool["input_schema"]
+        assert schema.get("type") == "object"
+        assert "properties" in schema
+        # Pydantic decorations should be stripped:
+        assert "title" not in schema  # only at root

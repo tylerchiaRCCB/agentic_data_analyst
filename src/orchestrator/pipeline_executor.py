@@ -37,6 +37,7 @@ from src.orchestrator.budget_tracker import BudgetExceeded, BudgetTracker
 from src.orchestrator.lineage_tracker import LineageTracker
 from src.orchestrator.prompt_assembler import AssembledPrompt, assemble_prompt
 from src.orchestrator.schemas import (
+    agent_output_tool,
     Artifact,
     PAYLOAD_BY_AGENT,
     AgentName,
@@ -335,12 +336,19 @@ class PipelineExecutor:
                 content_blocks.append(clarification)
             messages = [{"role": "user", "content": content_blocks}]
             t0 = time.perf_counter()
+            # Structured-output enforcement: pass the agent's artifact schema as
+            # an Anthropic tool. Claude is expected to emit the final artifact
+            # via tool_use rather than free-form JSON. Code execution still works
+            # mid-stream — both tools are available. The strong prompt-level
+            # instruction (in each agent.md) is that the final emit_*_artifact
+            # call is required.
             response: ClaudeResponse = self.client.call(
                 model=model,
                 system=prompt.system_blocks,  # structured form enables prompt caching
                 messages=messages,
                 max_tokens=self.config.max_tokens_per_call,
                 enable_code_execution=True,
+                output_tool=agent_output_tool(agent),
             )
             duration_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -354,9 +362,15 @@ class PipelineExecutor:
                 cache_write_tokens=response.cache_write_tokens,
             )
 
-            parsed = self._extract_json_payload(response.text)
+            # Prefer the structured tool_output (the canonical path post-enforcement).
+            # Fall back to text-extraction parsing only if the model emitted free-form
+            # JSON instead of using the tool — this is rare with the tool defined
+            # but covers cases where Claude bails out via plain text.
+            parsed = response.tool_output
             if parsed is None:
-                last_error = "No JSON payload found in agent response"
+                parsed = self._extract_json_payload(response.text)
+            if parsed is None:
+                last_error = "No structured artifact emitted (neither tool_use nor JSON in text)"
                 clarification = {"type": "text", "text": self._clarification_for(agent, last_error)}
                 continue
 
