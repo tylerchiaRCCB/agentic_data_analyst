@@ -1,0 +1,56 @@
+{
+  "source_run_ids": [
+    "test-run-A",
+    "test-run-B"
+  ],
+  "period_examined": "test period",
+  "connections": [
+    {
+      "id": "c1",
+      "source_findings": [
+        {
+          "run_id": "test-run-A",
+          "finding_id": "f1",
+          "claim": "Sales gap on SKU-7",
+          "grade": "A"
+        },
+        {
+          "run_id": "test-run-B",
+          "finding_id": "f3",
+          "claim": "Supply tight on SKU-7",
+          "grade": "B"
+        }
+      ],
+      "entity_overlap": "SKU-7",
+      "time_overlap": "weeks 18-22",
+      "mechanism": "Sales failing because supply tight",
+      "grade": "B",
+      "causation_vs_correlation": "strong_correlation",
+      "confounders_considered": [
+        "regional category decline"
+      ],
+      "confounders_ruled_out": [
+        "regional category decline"
+      ],
+      "confounders_remaining": [],
+      "carried_caveats": []
+    }
+  ],
+  "non_connections": [
+    {
+      "id": "nc1",
+      "source_finding": {
+        "run_id": "test-run-A",
+        "finding_id": "f2",
+        "claim": "Sales gap on SKU-9",
+        "grade": "B"
+      },
+      "where_connection_would_appear": "supply chain run",
+      "why_no_connection": "Supply was not constrained on SKU-9 in same period",
+      "implication_for_next_step": "Investigate within sales for SKU-9 root cause"
+    }
+  ],
+  "rendered_output_markdown": "# Cross-functional synthesis\n\n## Connections\n- SKU-7 sales gap \u00d7 supply tightness (grade B)\n\n## Non-connections\n- SKU-9 sales gap not supply-driven",
+  "carried_caveats": [],
+  "statistics": []
+}

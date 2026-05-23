@@ -18,6 +18,10 @@ model_per_agent:
   opportunity-identifier: claude-opus-4-7
   findings-validator: claude-opus-4-7
   communication-agent: claude-sonnet-4-6
+  # Synthesizer reasons over already-validated findings across runs;
+  # uses Opus because cross-functional rigor is the value prop and
+  # cross-run reasoning is the most demanding task in the system.
+  synthesizer-agent: claude-opus-4-7
 
 # Per-agent budgets are advisory in MVP (telemetry only). The Question Framer
 # sets `token_budget` per run; this is the default cap if the framer omits it.

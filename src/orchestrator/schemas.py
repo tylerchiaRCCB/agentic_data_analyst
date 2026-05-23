@@ -32,6 +32,8 @@ AgentName = Literal[
     "opportunity-identifier",
     "findings-validator",
     "communication-agent",
+    # Standalone (not part of any single-run pipeline composition):
+    "synthesizer-agent",
 ]
 
 _CANONICAL_AGENTS: set[str] = {
@@ -39,6 +41,7 @@ _CANONICAL_AGENTS: set[str] = {
     "relationship-analyzer", "pattern-discoverer", "time-series-analyzer",
     "root-cause-investigator", "opportunity-identifier",
     "findings-validator", "communication-agent",
+    "synthesizer-agent",
 }
 
 
@@ -1017,6 +1020,78 @@ class CommunicationAgentPayload(StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# Synthesizer (cross-run; standalone, not part of any single-run pipeline)
+# ---------------------------------------------------------------------------
+
+
+class CrossRunConnection(StrictModel):
+    """A validated connection between findings from DIFFERENT source runs.
+
+    The synthesizer's primary output type. Grade is bounded by the weakest
+    constituent source finding (see cross-run-synthesis.md).
+    """
+
+    id: str
+    source_findings: list[dict[str, Any]]  # [{run_id, finding_id, claim, grade}]
+    entity_overlap: str  # e.g., "SKU-7 in region NE"
+    time_overlap: str   # e.g., "weeks 18-22"
+    mechanism: str      # plain-English business mechanism
+    grade: ConfidenceGrade
+    causation_vs_correlation: Literal["established_causal", "strong_correlation", "associational"] = "associational"
+    triangulation_evidence: str = ""  # entities/time-windows supporting the pattern
+    confounders_considered: list[str] = Field(default_factory=list)
+    confounders_ruled_out: list[str] = Field(default_factory=list)
+    confounders_remaining: list[str] = Field(default_factory=list)
+    carried_caveats: list[Caveat] = Field(default_factory=list)
+    recommended_action: str | None = None
+
+
+class CrossRunNonConnection(StrictModel):
+    """A finding from one source run where the OBVIOUS cross-functional
+    connection did NOT appear in other source runs — disciplined null.
+    """
+
+    id: str
+    source_finding: dict[str, Any]  # {run_id, finding_id, claim, grade}
+    where_connection_would_appear: str  # function/data area where one might expect it
+    why_no_connection: str             # what was looked for and what was/wasn't observed
+    implication_for_next_step: str = ""
+
+
+class SynthesizerPayload(StrictModel):
+    """The Synthesizer Agent's artifact.
+
+    Connections are cross-run findings; non-connections are the disciplined
+    nulls. The rendered markdown is the final cross-functional report.
+    """
+
+    source_run_ids: list[str]
+    period_examined: str
+    connections: list[CrossRunConnection] = Field(default_factory=list)
+    non_connections: list[CrossRunNonConnection] = Field(default_factory=list)
+    rendered_output_markdown: str
+    carried_caveats: list[Caveat] = Field(default_factory=list)
+    statistics: list[Statistic] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        """Light normalization for variant emissions."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if "rendered_output_markdown" not in d:
+            d["rendered_output_markdown"] = ""
+        if "source_run_ids" not in d:
+            for alt in ("source_runs", "run_ids", "runs"):
+                if alt in d:
+                    val = d.pop(alt)
+                    d["source_run_ids"] = val if isinstance(val, list) else [str(val)]
+                    break
+        return d
+
+
+# ---------------------------------------------------------------------------
 # Envelope (§2)
 # ---------------------------------------------------------------------------
 
@@ -1032,6 +1107,7 @@ PAYLOAD_BY_AGENT: dict[AgentName, type[BaseModel]] = {
     "opportunity-identifier": OpportunityIdentifierPayload,
     "findings-validator": FindingsValidatorPayload,
     "communication-agent": CommunicationAgentPayload,
+    "synthesizer-agent": SynthesizerPayload,
 }
 
 

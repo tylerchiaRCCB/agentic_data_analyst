@@ -194,6 +194,18 @@ uv run python -m src.tools.extract_context_gaps --run-id 20260520T223548Z-89dba6
 uv run python -m src.tools.extract_context_gaps --aggregate
 ```
 
+**Synthesize across multiple per-function runs.** Identify cross-functional connections (e.g., *"sales execution gap on SKU-7 caused by supply tightness"*) and notable non-connections across separately-validated runs. The Synthesizer never invents findings — it only connects already-validated ones, with confounding analysis and causation calibration. Strongest differentiator vs. Microsoft Fabric Agents / Snowflake Cortex Agents (which run per-function but do not validate cross-functional synthesis):
+
+```bash
+# Synthesize across explicit run IDs (typical: one run per business function)
+uv run python -m src.tools.synthesize_runs --run-ids sales-run-id,supply-run-id,trade-run-id
+
+# Or use a glob over runs/
+uv run python -m src.tools.synthesize_runs --runs-glob "20260530T*"
+```
+
+Outputs `output/synthesis-<ts>.md` (or `-pending-review.md` if the HITL gate fires) plus a structured artifact at `runs/synthesis-<ts>/artifacts/`. Synthesis findings flow through the same `hitl_review_threshold` gate as per-function runs.
+
 #### Where missing-context findings surface (and how to use them)
 
 The system flags context gaps in three places — same data, three audiences:
