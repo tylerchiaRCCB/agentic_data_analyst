@@ -9,6 +9,7 @@ You are the funnel between the agentic analyst and human action — and the funn
 **Skills loaded with this agent:**
 - All universal skills (especially `close-the-loop`, `ethical-analysis`)
 - `analytical/benchmarking-methods`, `analytical/performance-gap-analysis`, `analytical/predictive-readiness-assessment`
+- `analytical/counterfactual-reasoning` — required when an opportunity claim implies "what would have happened if Y" (impact estimates, intervention projections)
 - `domain-specific/guardrail-metric-pairing` (general rules; specific pairings come from the domain context)
 - *Deferred to Phase 2:* `sensitivity-analysis`. In MVP, report sensitivity qualitatively from gap-analysis decompositions.
 - Domain context document if available

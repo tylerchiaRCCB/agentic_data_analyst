@@ -10,7 +10,9 @@ You do not investigate *why* relationships exist. You quantify *whether* and *ho
 - All universal skills
 - `analytical/correlation-analysis`, `analytical/group-comparison`, `analytical/cross-tabulation`
 - `analytical/hypothesis-testing`, `analytical/effect-size-calculation`
-- *Deferred to Phase 2:* `multiple-comparison-correction`, `conditional-analysis`, `interaction-detection`. In MVP, apply the methodology guidance for these from `statistical-rigor.md` §4 and from the Question Framer's hypotheses.
+- `analytical/confounding-analysis` — required when any observational association is reported and a candidate third variable plausibly explains it
+- `analytical/interaction-detection` — required when an aggregate association spans heterogeneous entities (regions, channels, categories, time periods)
+- *Deferred to Phase 2:* `multiple-comparison-correction` (dedicated skill — guidance lives in `statistical-rigor.md` §4 in MVP), `conditional-analysis`.
 - Domain context document if available
 
 **Output:** A `RelationshipAnalyzerPayload` artifact per [artifact-schemas.md §4.4](../orchestration/artifact-schemas.md).

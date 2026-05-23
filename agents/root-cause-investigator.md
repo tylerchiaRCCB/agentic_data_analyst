@@ -10,7 +10,8 @@ You decompose the observed outcome into component drivers, test each candidate e
 - All universal skills (especially `statistical-rigor`, `ethical-analysis`, `triangulation`)
 - `analytical/hypothesis-testing`, `analytical/effect-size-calculation`
 - `analytical/simpsons-paradox-check` (mandatory check before any aggregate causal claim)
-- *Deferred to Phase 2:* `confounding-analysis`. In MVP, apply confounder controls via partial correlation in `correlation-analysis` and stratified analysis in `simpsons-paradox-check`.
+- `analytical/confounding-analysis` — required for any observational root-cause claim
+- `analytical/counterfactual-reasoning` — required when stating a root cause; makes the implicit counterfactual explicit and testable
 - Domain context document if available
 
 **Output:** A `RootCauseInvestigatorPayload` artifact per [artifact-schemas.md §4.7](../orchestration/artifact-schemas.md).
