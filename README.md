@@ -249,3 +249,9 @@ The first runs are intentionally **contextless** — no `context/domains/<domain
 When the Findings Validator passes forward zero findings worth surfacing, the Communication Agent renders a descriptive summary: what was examined, what baselines were checked, what would have constituted a finding, and that none was found. This is a complete and valid output. It is not a failure mode and it is not a fallback. It is the system doing its job — respecting the recipient's attention by not crying wolf.
 
 If you contribute to this repository, hold that line in every file you write.
+
+## For AI coding assistants
+
+If you are an AI coding assistant (Claude Code, GitHub Copilot, Cursor, etc.) being asked to make changes here, read [CLAUDE.md](CLAUDE.md) first. It covers framing (non-negotiable), required reading order, repo layout, hard rules, conventions for adding things (agents, skills, normalizers, semantic models), common tasks, and the work-IP boundary. GitHub Copilot specifically: see [.github/copilot-instructions.md](.github/copilot-instructions.md) for the Copilot-focused subset.
+
+For humans walking new team members or stakeholders through the framework: open [docs/walkthrough.md](docs/walkthrough.md) — the 7-step narrated tour with specific file references. The companion [docs/quick-reference.md](docs/quick-reference.md) is your personal cheat sheet on the 8 files that come up repeatedly.
