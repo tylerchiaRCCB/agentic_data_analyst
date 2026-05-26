@@ -12,16 +12,18 @@ Every design decision — every agent, every skill, every prompt — must reinfo
 
 ## How it works (high level)
 
-The system runs as a composed pipeline of specialized agents, dynamically assembled per question or scheduled prompt:
+The system runs as a composed pipeline of 11 specialized agents, dynamically assembled per question or scheduled prompt:
 
 1. **Question Framer** classifies the input, generates testable hypotheses, and outputs a pipeline composition.
 2. **Data Retrieval Agent** loads data and applies prompt-injection defenses on free-text columns. It is read-only.
 3. **Data Profiler** assesses quality, completeness, freshness, grain, and distributions via executed code.
 4. **Relationship Analyzer, Pattern Discoverer, Time Series Analyzer** apply the analytical techniques the question requires — all statistical claims are computed, never reasoned about.
-5. **Root Cause Investigator** explains why specific deviations occurred, with computed evidence.
+5. **Root Cause Investigator** explains why specific deviations occurred, with computed evidence. Applies confounding analysis and counterfactual reasoning.
 6. **Opportunity Identifier** translates findings into forward-tense actions, or flags patterns that warrant a predictive model rather than an immediate intervention.
 7. **Findings Validator** independently re-computes every claim, checks guardrail pairings, and assigns A–F confidence grades. Grades D and F do not reach output.
 8. **Communication Agent** renders an action card when findings warrant action, or a descriptive summary when they do not. It never invents a finding to fill space.
+
+**Plus the Synthesizer Agent** (standalone, runs across multiple per-function pipeline runs): identifies cross-functional connections and notable non-connections between separately-validated findings. The Synthesizer never invents findings — it only connects already-validated ones, with confounding analysis applied to every cross-functional link and connection grades capped at the weakest constituent source finding's grade. This is the framework's strongest differentiator vs. Microsoft Fabric Agents / Snowflake Cortex Agents, which run per-function but do not synthesize across with validation.
 
 Agents are stage-level decision-makers (what to do). Skills are methodology files (how to do it). Each API call assembles `agent + relevant skills + universal skills + domain context`. Domain meaning lives in markdown context documents, version-controlled and owned by data + business partners — not hardcoded in agent prompts.
 
@@ -69,12 +71,12 @@ Detailed layout — including the specific markdown and Python files that will p
 ## Build status
 
 System definition is complete:
-- 10 agent markdowns in `agents/`
-- 33 skill markdowns across `skills/{universal, analytical, validation, output, domain-specific}/`
+- 11 agent markdowns in `agents/` (10 in-pipeline + the standalone Synthesizer Agent)
+- 34+ skill markdowns across `skills/{universal, analytical, validation, output, domain-specific}/`
 - 3 orchestration design documents in `orchestration/`
-- Core runnable code: orchestrator, Claude API client, data loader, observability, Pydantic artifact schemas, scaffolded tests
+- Core runnable code: orchestrator, multi-provider LLM abstraction (Anthropic primary + LiteLLM for OpenAI/Gemini), data loader, Snowflake/Cortex client scaffolding, observability, Pydantic artifact schemas, 94+ tests including mock-SDK orchestrator integration tests
 
-Not yet built (deferred): demo data generator (no scenarios until late next week), full delivery formatting, parallel-group execution, Snowflake / Cortex Analyst data path, persistent memory.
+Not yet built (deferred to Phase 2): full delivery layer (scheduled jobs, Slack/email), Snowflake/Cortex real-mode (scaffolded; activates with production credentials), second-validator LLM cross-check, production observability backend integration.
 
 ## Quickstart
 

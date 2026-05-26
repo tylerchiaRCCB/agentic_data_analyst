@@ -1,6 +1,8 @@
 # GitHub Copilot Instructions
 
-You're assisting on the **Agentic Data Analyst** — a multi-agent system that applies senior-data-analyst-level rigor to data nobody has time to manually examine. The repo is a personal-account framework; team-specific deployment work happens in a separate work-owned repo (Azure DevOps).
+You're assisting on the **Agentic Data Analyst** — a multi-agent AI framework (11 specialized agents, 34+ methodology skills) that applies senior-data-analyst-level rigor to data nobody has time to manually examine. 10 agents compose the in-pipeline flow (question framing → data retrieval → profiling → analytical stages → validation → communication); the 11th (**Synthesizer Agent**) is standalone and runs across multiple completed per-function pipeline runs for cross-functional analysis — surfacing connections + disciplined non-connections between separately-validated findings.
+
+The repo is a personal-account framework; team-specific deployment work happens in a separate work-owned repo (Azure DevOps).
 
 ## Read these first
 

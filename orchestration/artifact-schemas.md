@@ -60,7 +60,8 @@ type AgentName =
   | "root-cause-investigator"
   | "opportunity-identifier"
   | "findings-validator"
-  | "communication-agent";
+  | "communication-agent"
+  | "synthesizer-agent";  // Standalone — cross-run synthesis; not part of any single-run pipeline composition
 ```
 
 ---
@@ -506,6 +507,53 @@ type ActionCard = {
 1. If `findings_review` from the Validator is empty (or contains only grade-D/F findings), `action_cards` MUST be empty and `descriptive_summary` MUST be populated.
 2. The Communication Agent never invents a finding to fill `action_cards`. The schema permits empty, and the discipline requires it.
 3. Every `Caveat` with `severity: "high"` from any upstream artifact must appear in either `action_cards[].caveats` or `carried_caveats`. Lost caveats are a validation failure.
+
+### 4.11 Synthesizer Agent
+
+*Standalone — not part of any single-run pipeline composition. Invoked via `src/tools/synthesize_runs.py` over N completed per-function runs. Consumes their Findings Validator artifacts as input.*
+
+```
+SynthesizerPayload {
+  source_run_ids: string[],                 // run IDs of the per-function runs synthesized
+  period_examined: string,                  // human-readable period the synthesis covered
+  connections: CrossRunConnection[],        // cross-functional connections between validated findings
+  non_connections: CrossRunNonConnection[], // disciplined nulls: where the obvious link did NOT appear
+  rendered_output_markdown: string,         // the cross-functional report (recipient-facing)
+  carried_caveats: Caveat[],                // ALL high-severity caveats from source runs (compound!)
+  statistics: Statistic[],                  // any synthesis-level statistics
+};
+
+CrossRunConnection {
+  id: string,
+  source_findings: { run_id: string, finding_id: string, claim: string, grade: ConfidenceGrade }[],
+  entity_overlap: string,                   // e.g. "SKU-7 in NE region"
+  time_overlap: string,                     // e.g. "weeks 18-22"
+  mechanism: string,                        // plain-English business mechanism
+  grade: ConfidenceGrade,                   // capped at WEAKEST constituent source finding's grade
+  causation_vs_correlation: "established_causal" | "strong_correlation" | "associational",
+  triangulation_evidence: string,
+  confounders_considered: string[],
+  confounders_ruled_out: string[],
+  confounders_remaining: string[],
+  carried_caveats: Caveat[],
+  recommended_action?: string,
+};
+
+CrossRunNonConnection {
+  id: string,
+  source_finding: { run_id: string, finding_id: string, claim: string, grade: ConfidenceGrade },
+  where_connection_would_appear: string,
+  why_no_connection: string,
+  implication_for_next_step: string,
+};
+```
+
+**Critical invariants:**
+1. The Synthesizer NEVER invents findings. Every `source_findings` entry must reference a real finding from a real source run's Findings Validator artifact.
+2. `connections[].grade` is bounded by the weakest constituent source finding's grade. A connection between a grade-A and grade-C finding is at most grade C.
+3. Every high-severity caveat from every source run must appear in either the connection's `carried_caveats` or in the run-level `carried_caveats`. Caveats compound across the synthesis boundary; they never get filtered.
+4. `causation_vs_correlation` defaults to `associational` for cross-functional findings unless triangulation + ruled-out confounders justify `strong_correlation`. `established_causal` is reserved for quasi-experimental evidence (rare).
+5. `non_connections` are first-class output, not a fallback. A synthesis where 100% of findings are connections (and zero are non-connections) is suspect — likely the synthesizer manufactured links.
 
 ---
 

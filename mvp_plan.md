@@ -53,7 +53,9 @@ Both modes route through the same agent infrastructure. The Question Framer clas
 
 **Code-Computed Validation as Quality Gate.** Findings Validator independently re-computes every claim before it reaches output. Findings that don't survive validation get downgraded or filtered.
 
-### The 10 Agents
+### The 11 Agents
+
+*10 agents compose the in-pipeline analytical flow; the 11th (Synthesizer) is standalone and runs over multiple completed per-function pipeline runs for cross-functional analysis.*
 
 1. **Question Framer** — Entry-point strategic planner. Interprets the input (live question or scheduled prompt), classifies complexity, generates testable hypotheses, determines which downstream agents compose the pipeline. Produces a typed analytical brief.
 
@@ -74,6 +76,8 @@ Both modes route through the same agent infrastructure. The Question Framer clas
 9. **Findings Validator** — Independent quality gate. Re-computes every claim, runs statistical revalidation, checks guardrail metric pairings. Assigns A-F confidence grades per finding. Two distinct skills under one agent: statistical revalidation and guardrail pairing check.
 
 10. **Communication Agent** — Renders output for recipients. One agent, two skills: interactive narrative response (BLUF format for user questions) and proactive action card (alert format with owner/due/follow-up for scheduled findings). Format-specific templates selected by the Question Framer's output_mode field.
+
+11. **Synthesizer Agent** *(standalone — runs over multiple per-function pipeline runs, not inside any single run's pipeline composition)* — Identifies cross-functional connections and notable non-connections between validated findings from separately-completed per-function runs. Consumes the Findings Validator artifacts from each source run (gold-standard input: filtered, graded, caveat-rich). Never invents findings; only connects already-validated ones. Connection grades are capped at the weakest constituent source finding's grade; every candidate connection runs through confounding analysis (cross-functional findings have uniquely high exposure to confounding); high-severity caveats compound across the synthesis boundary. Invoked via `src/tools/synthesize_runs.py`. Strongest single differentiator vs. Microsoft Fabric Agents and Snowflake Cortex Agents — neither does validated cross-functional synthesis natively.
 
 ### Pipeline Composition Examples
 
@@ -98,6 +102,10 @@ Question Framer → Data Retrieval → Data Profiler → Pattern Discoverer → 
 **Proactive monitoring** (Scheduled weekly run):
 Question Framer (interprets scheduled prompt) → Data Retrieval → Data Profiler → Pattern Discoverer (hypothesis generation) → relevant analysis agents based on patterns found → Root Cause Investigator (for each significant pattern) → Opportunity Identifier → Findings Validator → Communication Agent (action card format)
 *Full pipeline, runs once with multiple findings investigated in parallel*
+
+**Cross-functional synthesis** (Standalone — runs AFTER multiple per-function pipeline runs have completed):
+Synthesizer Agent reads the Findings Validator artifacts from each source run; identifies cross-functional connections + notable non-connections; renders a single cross-cutting report. Used for hierarchical audiences (e.g. per-Account-Manager reports → regional synthesis → org-wide synthesis for executives). Invoked via `python -m src.tools.synthesize_runs --run-ids r1,r2,r3`.
+*Not part of any single-run pipeline composition; the Question Framer does not invoke it.*
 
 ---
 
@@ -819,8 +827,8 @@ Interactive Q&A mode (user types questions, system routes by complexity) is **de
 ### MVP Inclusions
 
 **Built in v1 by Claude Code:**
-- All 10 agents with markdown definitions
-- All 8 universal skills
+- All 11 agents with markdown definitions (10 in-pipeline + standalone Synthesizer)
+- All 9 universal skills (including `structured-output-contract` added with tool-use enforcement)
 - ~15 priority analytical skills covering demo scenarios:
   - correlation-analysis, group-comparison, cross-tabulation
   - clustering-algorithms, outlier-typology
