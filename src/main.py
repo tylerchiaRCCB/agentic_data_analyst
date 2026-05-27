@@ -392,18 +392,23 @@ def _dry_run(args: CLIArgs) -> int:
     print("\n[3/5] Assembling system prompts for each agent...")
     print(f"  domain:                 {args.domain or '(none — contextless run)'}")
     total_prompt_tokens = 0
+    from src.orchestrator.prompt_assembler import DEFAULT_SKILLS_BY_AGENT
     missing_context_flagged = False
-    for agent, skills in _DRY_RUN_AGENT_SKILLS.items():
+    for agent, _legacy_skills in _DRY_RUN_AGENT_SKILLS.items():
         try:
-            prompt = assemble_prompt(agent_name=agent, skills=skills, domain=args.domain)
+            # `skills` arg is ignored at runtime; canonical skills come from
+            # DEFAULT_SKILLS_BY_AGENT. The dry-run report shows the canonical
+            # count so it matches what an actual run would load.
+            prompt = assemble_prompt(agent_name=agent, domain=args.domain)
         except FileNotFoundError as e:
             print(f"  FAIL on {agent}: {e}")
             return 1
         tokens = _estimate_tokens(prompt.system_prompt)
         total_prompt_tokens += tokens
         flag = " (missing domain context)" if prompt.missing_domain_context else ""
+        canonical_count = len(DEFAULT_SKILLS_BY_AGENT.get(agent, []))
         print(
-            f"  {agent:25} skills:{len(skills):2}  files:{len(prompt.sections_loaded):2}  ~{tokens:5} tokens{flag}"
+            f"  {agent:25} skills:{canonical_count:2}  files:{len(prompt.sections_loaded):2}  ~{tokens:5} tokens{flag}"
         )
         if prompt.missing_domain_context:
             missing_context_flagged = True
@@ -482,10 +487,11 @@ def _dry_run(args: CLIArgs) -> int:
         "| Agent | Skills loaded | Files | ~Tokens |",
         "|---|---|---|---|",
     ]
-    for agent, skills in _DRY_RUN_AGENT_SKILLS.items():
-        prompt = assemble_prompt(agent_name=agent, skills=skills, domain=args.domain)
+    for agent, _legacy_skills in _DRY_RUN_AGENT_SKILLS.items():
+        prompt = assemble_prompt(agent_name=agent, domain=args.domain)
+        canonical_count = len(DEFAULT_SKILLS_BY_AGENT.get(agent, []))
         report_lines.append(
-            f"| {agent} | {len(skills)} | {len(prompt.sections_loaded)} | {_estimate_tokens(prompt.system_prompt):,} |"
+            f"| {agent} | {canonical_count} | {len(prompt.sections_loaded)} | {_estimate_tokens(prompt.system_prompt):,} |"
         )
     report_lines.extend(
         [

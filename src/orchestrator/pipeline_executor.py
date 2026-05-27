@@ -42,7 +42,11 @@ from src.observability.run_logger import RunLogger
 from src.observability.tracer import Tracer
 from src.orchestrator.budget_tracker import BudgetExceeded, BudgetTracker
 from src.orchestrator.lineage_tracker import LineageTracker
-from src.orchestrator.prompt_assembler import AssembledPrompt, assemble_prompt
+from src.orchestrator.prompt_assembler import (
+    DEFAULT_SKILLS_BY_AGENT,
+    AssembledPrompt,
+    assemble_prompt,
+)
 from src.orchestrator.schemas import (
     agent_output_tool,
     Artifact,
@@ -360,10 +364,15 @@ class PipelineExecutor:
         upstream_artifacts: dict[str, dict[str, Any]] | None = None,
         dataset_file_id: str | None = None,
     ) -> StageResult:
+        # Log the canonical skills that will actually load for this agent,
+        # not the (ignored) Framer-supplied list. The `skills` parameter is
+        # kept for backward compatibility with callers but does not affect
+        # what gets loaded — see DEFAULT_SKILLS_BY_AGENT in prompt_assembler.
+        canonical_skills = DEFAULT_SKILLS_BY_AGENT.get(agent, [])
         self.run_logger.info(
             f"Stage starting: {agent}",
             stage_index=stage_index,
-            skills=skills,
+            canonical_skills=canonical_skills,
         )
         t0 = time.perf_counter()
         with self.tracer.span(f"stage.{agent}", stage_index=stage_index) as span:
