@@ -32,40 +32,68 @@ def test_agent_definition_loaded() -> None:
     assert "data-profiler" in result.system_prompt
 
 
-def test_on_demand_skills_resolve() -> None:
-    skills = ["correlation-analysis", "statistical-revalidation", "proactive-action-card"]
-    result = assemble_prompt(agent_name="findings-validator", skills=skills)
-    # Each skill should appear in sections_loaded under its category folder
+def test_canonical_skills_load_per_agent() -> None:
+    """Each agent's canonical skill set (per DEFAULT_SKILLS_BY_AGENT) is loaded
+    automatically. The Framer does not choose skills — the orchestrator owns
+    that decision to eliminate skill-name hallucination at the entry point."""
+    result = assemble_prompt(agent_name="findings-validator")
     paths = "\n".join(result.sections_loaded)
-    assert "analytical/correlation-analysis.md" in paths
+    # Findings Validator's canonical skill set per DEFAULT_SKILLS_BY_AGENT:
     assert "validation/statistical-revalidation.md" in paths
-    assert "output/proactive-action-card.md" in paths
+    assert "validation/guardrail-pairing-check.md" in paths
+    assert "analytical/simpsons-paradox-check.md" in paths
+    assert "analytical/hypothesis-testing.md" in paths
 
 
-def test_missing_skill_is_permissive_and_surfaced() -> None:
-    """Question Framer can hallucinate skill names that don't exist in our repo.
-    Rather than hard-fail the whole pipeline, the framework skips missing skills
-    with a logged warning and tracks them in `missing_skills` so the executor
-    can surface them as a caveat. The agent proceeds without the missing skill."""
+def test_framer_specified_skills_are_ignored() -> None:
+    """The orchestrator no longer trusts the Question Framer to pick skills.
+    Whatever the Framer emits in its `skills` field, the runtime loads the
+    canonical set per DEFAULT_SKILLS_BY_AGENT.
+
+    This is the structural defense against hallucination at the entry point of
+    the framework. The Framer's job is sequencing agents; methodology is
+    agent-owned."""
+    # Even if the Framer requests garbage skills, the canonical set still loads
     result = assemble_prompt(
         agent_name="data-profiler",
         skills=["nonexistent-skill-xyz", "another-fake-skill"],
     )
-    assert result.missing_skills == ["nonexistent-skill-xyz", "another-fake-skill"]
-    # The prompt is still well-formed — universal + agent at minimum
-    assert "UNIVERSAL SKILLS" in result.system_prompt
-    assert "AGENT DEFINITION" in result.system_prompt
+    # Framer-specified skills don't appear in loaded paths
+    paths = "\n".join(result.sections_loaded)
+    assert "nonexistent-skill-xyz" not in paths
+    assert "another-fake-skill" not in paths
+    # Canonical data-profiler skills DO load (outlier-typology, cpg-derived-metrics)
+    assert "outlier-typology.md" in paths
+    assert "cpg-derived-metrics.md" in paths
+    # missing_skills is empty — canonical skills were found; ignored hallucinations don't count
+    assert result.missing_skills == []
 
 
-def test_partial_missing_skills_load_what_exists() -> None:
-    """When some skills exist and some don't, the existing ones load and the
-    missing ones are surfaced."""
-    result = assemble_prompt(
-        agent_name="findings-validator",
-        skills=["statistical-revalidation", "this-skill-does-not-exist"],
-    )
-    assert "statistical-revalidation" in [s.split("/")[-1].replace(".md", "") for s in result.sections_loaded]
-    assert result.missing_skills == ["this-skill-does-not-exist"]
+def test_every_canonical_agent_has_skill_mapping() -> None:
+    """DEFAULT_SKILLS_BY_AGENT must have an entry for every canonical agent.
+    Catches the regression where a new agent is added but its skill set is
+    forgotten."""
+    from src.orchestrator.prompt_assembler import DEFAULT_SKILLS_BY_AGENT
+    from src.orchestrator.schemas import PAYLOAD_BY_AGENT
+    for agent in PAYLOAD_BY_AGENT:
+        assert agent in DEFAULT_SKILLS_BY_AGENT, (
+            f"Agent {agent!r} has a payload schema but no entry in "
+            f"DEFAULT_SKILLS_BY_AGENT — its prompt won't load any on-demand skills."
+        )
+
+
+def test_canonical_skills_all_resolve() -> None:
+    """Every skill named in DEFAULT_SKILLS_BY_AGENT must actually exist in the
+    skills/ folder. If this fails, an agent's canonical skill set references a
+    file that's missing — the hallucination problem the mapping was designed
+    to prevent would re-appear via the mapping itself."""
+    from src.orchestrator.prompt_assembler import DEFAULT_SKILLS_BY_AGENT
+    for agent, skills in DEFAULT_SKILLS_BY_AGENT.items():
+        result = assemble_prompt(agent_name=agent)
+        assert result.missing_skills == [], (
+            f"Agent {agent!r} has canonical skills that don't exist in the repo: "
+            f"{result.missing_skills}. Check DEFAULT_SKILLS_BY_AGENT vs. skills/ folder contents."
+        )
 
 
 def test_missing_domain_context_is_permissive() -> None:

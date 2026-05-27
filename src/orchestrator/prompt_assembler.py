@@ -58,6 +58,92 @@ UNIVERSAL_SKILL_NAMES: frozenset[str] = frozenset({
 })
 
 
+# Per-agent canonical skill set. The framework loads these for every call to
+# the named agent, regardless of what the Question Framer specifies.
+#
+# Rationale: the Question Framer is an LLM and can hallucinate skill names
+# (e.g., requesting `date-parsing-integer-yyyymmdd` when no such skill exists).
+# For a discipline-first framework, having the entry-point stage make things
+# up is exactly the wrong failure mode. The mapping here is authoritative —
+# the orchestrator owns the skill set per agent, not the Framer.
+#
+# Each list is sourced from the corresponding `agents/<name>.md` "Skills loaded
+# with this agent" section. Keep this mapping and those markdown files
+# synchronized; the markdown is documentation, this is enforcement.
+#
+# Names omit the category prefix (analytical/, validation/, output/,
+# domain-specific/) since _resolve_skill searches all four directories.
+DEFAULT_SKILLS_BY_AGENT: dict[str, list[str]] = {
+    "question-framer": [
+        "hypothesis-generation-from-data",
+    ],
+    "data-retrieval-agent": [
+        # Nothing beyond universals — the data-retrieval agent's job is governed
+        # by its agent definition + universals (especially data-quality-standards).
+    ],
+    "data-profiler": [
+        "outlier-typology",
+        "cpg-derived-metrics",
+    ],
+    "relationship-analyzer": [
+        "correlation-analysis",
+        "group-comparison",
+        "cross-tabulation",
+        "hypothesis-testing",
+        "effect-size-calculation",
+        "confounding-analysis",
+        "interaction-detection",
+    ],
+    "pattern-discoverer": [
+        "clustering-algorithms",
+        "outlier-typology",
+        "hypothesis-generation-from-data",
+    ],
+    "time-series-analyzer": [
+        "stl-decomposition",
+        "change-point-detection",
+        "cohort-analysis",
+    ],
+    "root-cause-investigator": [
+        "hypothesis-testing",
+        "effect-size-calculation",
+        "simpsons-paradox-check",
+        "confounding-analysis",
+        "counterfactual-reasoning",
+    ],
+    "opportunity-identifier": [
+        "benchmarking-methods",
+        "performance-gap-analysis",
+        "predictive-readiness-assessment",
+        "counterfactual-reasoning",
+        "guardrail-metric-pairing",
+    ],
+    "findings-validator": [
+        "statistical-revalidation",
+        "guardrail-pairing-check",
+        "hypothesis-testing",
+        "simpsons-paradox-check",
+        "guardrail-metric-pairing",
+    ],
+    "communication-agent": [
+        "proactive-action-card",
+        "descriptive-summary-format",
+        "insight-first-formatting",
+        "confidence-language",
+        "stakeholder-communication",
+        "visualization-recommendations",
+    ],
+    "synthesizer-agent": [
+        "cross-run-synthesis",
+        "confounding-analysis",
+        "counterfactual-reasoning",
+        "confidence-language",
+        "proactive-action-card",
+        "descriptive-summary-format",
+    ],
+}
+
+
 @dataclass
 class AssembledPrompt:
     """The result of assembling all markdown into a system prompt.
@@ -190,12 +276,23 @@ def assemble_prompt(
 ) -> AssembledPrompt:
     """Build the system prompt for one agent call.
 
-    `skills` is the list from the Question Framer's `pipeline_composition` for this stage.
+    `skills` is **deprecated and ignored**. Skills are now owned by the agent
+    per `DEFAULT_SKILLS_BY_AGENT` — the Question Framer no longer chooses them.
+    This eliminates skill-name hallucination at the pipeline entry point, which
+    is exactly the kind of discipline breach a rigor-first framework cannot
+    tolerate. The argument is kept for backward compatibility with existing
+    callers (tests, replay tools) but its value does not affect prompt assembly.
+
     `domain` resolves a domain context document; absence is permissive.
 
     Returns the prompt as both a concatenated string (display/testing) and a structured
     list of system blocks with cache_control hints (for API calls with prompt caching).
     """
+    # Note `skills` is intentionally unused. The canonical per-agent skill set
+    # comes from DEFAULT_SKILLS_BY_AGENT. The orchestrator owns this; the LLM
+    # Framer cannot influence it.
+    del skills  # ignored by design
+    canonical_skills = DEFAULT_SKILLS_BY_AGENT.get(agent_name, [])
     loaded_paths: list[str] = []
 
     # ---------- Block 1: Universal skills (cacheable; shared across all agents) ----------
@@ -210,7 +307,7 @@ def assemble_prompt(
     agent_section_parts.append(f"\n\n---\n\n# AGENT DEFINITION — {agent_name}\n\n{agent_text}")
     loaded_paths.append(agent_path)
 
-    skills_text, skills_loaded, missing_skills = _load_skills(skills or [])
+    skills_text, skills_loaded, missing_skills = _load_skills(canonical_skills)
     agent_section_parts.append(skills_text)
     loaded_paths.extend(skills_loaded)
 
