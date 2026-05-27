@@ -140,17 +140,23 @@ StatisticKind = Literal[
     "other",             # legacy / unclassified — no enforcement
 ]
 
-# Kinds that REQUIRE an effect_size per statistical-rigor.md §2
-# ("full statistical picture"). Effect-size discipline is the structural
-# property that cannot be missing. CI is strongly recommended but is NOT
-# hard-required at the artifact level because multi-group omnibus tests
-# (one-way ANOVA, Kruskal-Wallis) and many other legitimate analyses
-# don't naturally produce a clean CI on the test statistic. The Validator's
-# Layer 1 rigor check downgrades findings citing CI-less statistics rather
-# than rejecting the artifact outright.
-EFFECT_SIZE_REQUIRED_KINDS: frozenset[StatisticKind] = frozenset({
+# Kinds for which the Findings Validator's Layer 1 rigor check expects an
+# effect_size. Absence is NOT a schema-level rejection (that would throw away
+# the entire stage's analytical work for a single missing field — too hard
+# a fail for a discipline-flexible framework). Instead, the Findings Validator
+# downgrades Findings citing such Statistics by one grade and adds a required
+# caveat. The discipline lives in the Validator stage (methodology), not in
+# the artifact schema (structure). See:
+#   - skills/validation/statistical-revalidation.md (the downgrade rules)
+#   - agents/findings-validator.md (Layer 1 rigor check)
+EFFECT_SIZE_RECOMMENDED_KINDS: frozenset[StatisticKind] = frozenset({
     "group_comparison", "correlation", "regression"
 })
+
+# Backward-compat alias — preserved so any external references continue to
+# import without breaking. Same set as RECOMMENDED; the enforcement layer is
+# what changed, not the kinds.
+EFFECT_SIZE_REQUIRED_KINDS = EFFECT_SIZE_RECOMMENDED_KINDS
 
 
 class Statistic(StrictModel):
@@ -175,27 +181,16 @@ class Statistic(StrictModel):
     correction_method: str | None = None
     correction_notes: str | None = None
 
-    @model_validator(mode="after")
-    def _enforce_required_fields_by_kind(self) -> "Statistic":
-        """Structural rigor enforcement (statistical-rigor.md §2).
-
-        Group comparisons, correlations, and regressions MUST report effect size.
-        That is the discipline that prevents fabricated "significant difference"
-        claims with no effect magnitude. CI is strongly recommended but NOT
-        rejected at the artifact layer — multi-group omnibus tests (ANOVA,
-        Kruskal-Wallis) and many other legitimate analyses don't produce a
-        clean CI on the test statistic. The Validator's Layer 1 rigor check
-        downgrades findings citing CI-less statistics with a required caveat,
-        which is the right tradeoff vs. rejecting the artifact and losing the
-        entire stage's analytical work.
-        """
-        if self.statistic_kind in EFFECT_SIZE_REQUIRED_KINDS:
-            if self.effect_size is None:
-                raise ValueError(
-                    f"Statistic id={self.id!r} kind={self.statistic_kind!r} requires "
-                    f"effect_size (per statistical-rigor.md §2)."
-                )
-        return self
+    # Note: effect_size and confidence_interval are NOT structurally enforced.
+    # Methodology rigor (which kinds need effect_size, when CI matters, etc.)
+    # lives in the Findings Validator — see skills/validation/statistical-revalidation.md.
+    # The Validator downgrades Findings citing rigor-incomplete Statistics; it does
+    # not reject the artifact. This separation lets the framework absorb legitimate
+    # analytical nuance (null-result regressions, omnibus tests without CI) without
+    # throwing away the entire stage's work for missing optional fields.
+    #
+    # The schema's job: validate structure. The Validator's job: validate methodology.
+    # The Communication Agent's job: calibrate language to evidence strength.
 
 
 class Caveat(StrictModel):

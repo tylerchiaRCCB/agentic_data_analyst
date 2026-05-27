@@ -213,22 +213,56 @@ def test_statistic_descriptive_kind_does_not_require_effect_size() -> None:
     assert s.statistic_kind == "descriptive"
 
 
-def test_statistic_group_comparison_requires_effect_size() -> None:
-    """A group_comparison statistic without effect_size raises ValidationError."""
-    from pydantic import ValidationError
-    from src.orchestrator.schemas import Statistic, LineageRef
-    with pytest.raises(ValidationError) as exc:
-        Statistic(
-            id="s1", metric="volume_diff", value=12.3,
-            computation="mannwhitneyu(a, b)",
-            sample_size=200,
-            p_value=0.001,
-            confidence_interval={"lower": 5.0, "upper": 20.0, "level": 0.95},
-            statistic_kind="group_comparison",
-            # effect_size MISSING
-            lineage=LineageRef(source="dataset", data_slice="region=NE,SE", code_ref="cell_5"),
-        )
-    assert "effect_size" in str(exc.value)
+def test_statistic_group_comparison_accepts_missing_effect_size() -> None:
+    """Schema accepts a group_comparison without effect_size — methodology rigor
+    is enforced at the Findings Validator stage (downgrade + caveat), NOT at the
+    artifact layer. Rejecting the artifact would throw away the entire stage's
+    analytical work for one missing optional field. The Validator's Layer 1
+    rigor check is the right place for this enforcement.
+    See skills/validation/statistical-revalidation.md for the downgrade rules."""
+    from src.orchestrator.schemas import LineageRef, Statistic
+    s = Statistic(
+        id="s1", metric="volume_diff", value=12.3,
+        computation="mannwhitneyu(a, b)",
+        sample_size=200,
+        p_value=0.001,
+        confidence_interval={"lower": 5.0, "upper": 20.0, "level": 0.95},
+        statistic_kind="group_comparison",
+        # effect_size intentionally MISSING — schema accepts; Validator handles
+        lineage=LineageRef(source="dataset", data_slice="region=NE,SE", code_ref="cell_5"),
+    )
+    assert s.effect_size is None
+    assert s.statistic_kind == "group_comparison"
+
+
+def test_statistic_regression_null_result_accepts_missing_effect_size() -> None:
+    """Regression test for the actual failure mode from the first real run:
+    OLS slope checking Water-category FTPR stability — slope effectively zero,
+    p=0.72, CI straddles zero. The agent correctly emitted this as kind='regression'
+    without an effect_size because the ABSENCE of an effect is the finding.
+
+    Previously the schema rejected this; new behavior accepts it. The Validator's
+    Layer 1 rigor check renders this as a `pass` outcome (null result correctly
+    documented), not a partial/fail."""
+    from src.orchestrator.schemas import LineageRef, Statistic
+    s = Statistic(
+        id="stat_water_stability_check",
+        metric="Water category late-segment FTPR slope (stability verification)",
+        value=-7.1e-05,
+        computation="OLS slope on Water-category volume-weighted weekly FTPR for late segment (weeks 38-51). p=0.72, CI straddles zero.",
+        sample_size=14,
+        p_value=0.72,
+        unit="FTPR rate/week",
+        statistic_kind="regression",
+        # effect_size intentionally MISSING — null result, no effect to size
+        lineage=LineageRef(
+            source="synthetic_walmart.csv",
+            data_slice="CATEGORY == 'Water' AND DATE >= 2026-03-30; weekly volume-weighted aggregate",
+            code_ref="linregress(week_index, water_late_weekly_ftpr)",
+        ),
+    )
+    assert s.effect_size is None  # absence is correct for a null result
+    assert s.p_value == 0.72  # null result documented properly
 
 
 def test_statistic_correlation_accepts_missing_confidence_interval() -> None:

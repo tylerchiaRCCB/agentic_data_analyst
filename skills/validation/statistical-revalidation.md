@@ -17,6 +17,26 @@ Examine the methodology the upstream agent used to produce the claim:
 - Were effect sizes reported alongside p-values? Is the effect size practically meaningful, not just statistically detectable?
 - Were resistant statistics used on skewed metrics?
 
+**Explicit downgrade rules — effect_size omissions:**
+
+The Statistic schema does not reject artifacts for missing effect_size (that would throw away the entire stage's analytical work for a single missing field — too hard a fail). **Rigor enforcement lives here, at the Validator stage**, via grade downgrade + required caveat:
+
+| Statistic kind | effect_size present? | Action |
+|---|---|---|
+| `group_comparison`, `correlation`, `regression` | ✅ Yes, with appropriate measure (Cohen's d / Cramér's V / eta²/ Spearman ρ / Pearson r / OLS β etc.) | Layer 1 outcome: `pass` |
+| `group_comparison`, `correlation`, `regression` (significant effect — p < 0.05 AND CI excludes zero) | ❌ Missing | Layer 1 outcome: `partial`. Downgrade Finding by one grade. Add required_caveat: *"Effect size not reported on a statistically significant {kind}; magnitude of effect is uncertain."* |
+| `regression` documenting a clear null result (p ≥ 0.10 AND CI contains zero) | ❌ Missing | Layer 1 outcome: `pass`. The absence of an effect IS the finding; effect_size omission is appropriate. Communication Agent renders as null-result language ("no detectable effect; achieved power adequate to rule out..."). |
+| `descriptive`, `change_point`, `outlier`, `other` | — | No effect_size expectation; Layer 1 outcome based on other criteria. |
+
+**The discipline distinction:** an agent claiming a real effect without an effect size is sloppy methodology (downgrade). An agent reporting "no effect found" without an effect size is *correct* methodology (the null result IS the finding, and reporting an effect size for a null result would invite false precision).
+
+**Explicit downgrade rules — confidence_interval omissions:**
+
+Similar pattern — CI omissions trigger downgrades, not rejections:
+- Two-group comparisons (t-test, Mann-Whitney) without CI on the effect → downgrade one grade
+- Correlations without CI on the coefficient → downgrade one grade
+- Multi-group omnibus tests (ANOVA, Kruskal-Wallis) without CI → **no downgrade** (CI on omnibus tests is non-standard)
+
 Outcome: `pass` / `partial` / `fail`. A `fail` here downgrades the finding regardless of subsequent layers.
 
 ### Layer 2 — Independent recomputation
