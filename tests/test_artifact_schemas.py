@@ -328,3 +328,88 @@ def test_statistic_other_kind_is_unenforced_for_backward_compat() -> None:
     )
     assert s.statistic_kind == "other"
     # No effect_size required, no CI required
+
+
+# ---------------------------------------------------------------------------
+# Envelope unwrapping — Claude tool_use occasionally wraps the artifact in a
+# single-key envelope ($PARAMETER_VALUE etc.); validate_payload strips it
+# before Pydantic sees it so the schema doesn't fail on superficial nesting.
+# ---------------------------------------------------------------------------
+
+
+def test_unwrap_envelope_strips_parameter_value_wrapper() -> None:
+    """Claude's emit_*_artifact tool_use sometimes wraps the input in
+    `{"$PARAMETER_VALUE": {actual payload}}` — likely training-data templating
+    bleed-through. The actual payload is one level too deep for Pydantic to
+    find the required fields. Test pins this exact failure mode from the DS's
+    real run."""
+    from src.orchestrator.schemas import validate_payload
+
+    # Build a valid root-cause-investigator payload, then wrap it
+    inner_payload = {
+        "anomaly_under_investigation": {
+            "description": "Test anomaly",
+            "scope": "test",
+        },
+        "primary_root_cause": {
+            "causation_vs_correlation": "associational",
+            "explanation": "test",
+        },
+        "analytical_caveats": [],
+        "statistics": [],
+    }
+    wrapped = {"$PARAMETER_VALUE": inner_payload}
+
+    # Without unwrapping, this would fail with "Field required: anomaly_under_investigation"
+    result = validate_payload("root-cause-investigator", wrapped)
+    assert result.anomaly_under_investigation == {"description": "Test anomaly", "scope": "test"}
+
+
+def test_unwrap_envelope_strips_input_wrapper() -> None:
+    """Variant: Claude sometimes echoes back the tool_use parameter name `input`."""
+    from src.orchestrator.schemas import validate_payload
+
+    inner_payload = {
+        "anomaly_under_investigation": {"description": "x", "scope": "x"},
+        "primary_root_cause": {"causation_vs_correlation": "associational", "explanation": "x"},
+    }
+    wrapped = {"input": inner_payload}
+    result = validate_payload("root-cause-investigator", wrapped)
+    assert result.anomaly_under_investigation["description"] == "x"
+
+
+def test_unwrap_envelope_handles_double_wrap() -> None:
+    """Defense in depth: even if the model double-wraps, unwrap up to max_depth."""
+    from src.orchestrator.schemas import validate_payload
+
+    inner_payload = {
+        "anomaly_under_investigation": {"description": "x", "scope": "x"},
+        "primary_root_cause": {"causation_vs_correlation": "associational", "explanation": "x"},
+    }
+    double_wrapped = {"$PARAMETER_VALUE": {"input": inner_payload}}
+    result = validate_payload("root-cause-investigator", double_wrapped)
+    assert result.anomaly_under_investigation["description"] == "x"
+
+
+def test_unwrap_envelope_does_not_unwrap_legitimate_single_key_payloads() -> None:
+    """Safeguard: a real payload with one top-level key whose name isn't in the
+    known envelope set should NOT be unwrapped. Tests the guard against
+    accidentally destructuring legitimate single-field artifacts."""
+    from src.orchestrator.schemas import _unwrap_envelope
+
+    legitimate_single_key = {"custom_top_level_field": {"a": 1}}
+    result = _unwrap_envelope(legitimate_single_key)
+    assert result == legitimate_single_key  # untouched
+
+
+def test_unwrap_envelope_does_not_unwrap_multi_key_payloads() -> None:
+    """Safeguard: payloads with multiple top-level keys are real artifacts,
+    not envelopes — never unwrap, regardless of key names."""
+    from src.orchestrator.schemas import _unwrap_envelope
+
+    real_payload = {
+        "input": "some user input field",  # has "input" but also other keys
+        "other_field": 42,
+    }
+    result = _unwrap_envelope(real_payload)
+    assert result == real_payload  # untouched

@@ -1129,14 +1129,81 @@ class Artifact(StrictModel):
         return v
 
 
+# Known single-key wrappers Claude occasionally emits around tool_use input.
+# The actual artifact is nested one (sometimes more) levels deep inside these.
+# Most common: `$PARAMETER_VALUE`, presumably bleed-through from training-data
+# templating. We strip these *before* schema validation so the payload is
+# correctly shaped when Pydantic sees it.
+_KNOWN_ENVELOPE_KEYS: frozenset[str] = frozenset({
+    "$PARAMETER_VALUE",
+    "input",         # tool_use's own param name; sometimes echoed back
+    "parameters",
+    "arguments",     # OpenAI-style function-calling convention; occasionally leaks
+    "payload",
+    "value",
+    "result",
+    "output",
+    "data",
+})
+
+
+def _unwrap_envelope(payload: dict[str, Any], max_depth: int = 3) -> dict[str, Any]:
+    """Strip known single-key wrapper envelopes from a tool_use payload.
+
+    Claude sometimes wraps its emit_*_artifact input in a `{"$PARAMETER_VALUE": {...}}`
+    envelope (or similar), making the actual artifact nested too deep for Pydantic
+    to find the required fields. This function recursively unwraps such envelopes
+    up to `max_depth` levels, with three safeguards to avoid false-positive
+    unwrapping of real payloads:
+
+      1. Only unwrap when the dict has EXACTLY one key.
+      2. That key must be in _KNOWN_ENVELOPE_KEYS.
+      3. The value must itself be a dict (not a list, primitive, or None).
+
+    If the payload is already in the right shape, this function is a no-op.
+
+    Logs at INFO when an unwrap happens, so we can track how often Claude is
+    emitting envelopes in practice.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    current = payload
+    unwrap_path: list[str] = []
+    for _ in range(max_depth):
+        if (
+            isinstance(current, dict)
+            and len(current) == 1
+            and isinstance(next(iter(current.values())), dict)
+        ):
+            key = next(iter(current.keys()))
+            if key in _KNOWN_ENVELOPE_KEYS:
+                unwrap_path.append(key)
+                current = next(iter(current.values()))
+                continue
+        break
+
+    if unwrap_path:
+        logger.info(
+            "Unwrapped tool_use envelope before schema validation: %s",
+            " -> ".join(unwrap_path),
+        )
+    return current
+
+
 def validate_payload(agent: AgentName, raw_payload: dict[str, Any]) -> BaseModel:
     """Validate a raw payload against the schema for the given agent.
+
+    Strips known single-key wrapper envelopes (e.g. `$PARAMETER_VALUE`) before
+    validating, so legitimate artifacts wrapped by the model's tool_use
+    emission don't fail Pydantic on superficial nesting.
 
     Raises pydantic.ValidationError on failure. The caller wraps in retry logic
     per failure-recovery.md §2.
     """
     cls = PAYLOAD_BY_AGENT[agent]
-    return cls.model_validate(raw_payload)
+    payload = _unwrap_envelope(raw_payload) if isinstance(raw_payload, dict) else raw_payload
+    return cls.model_validate(payload)
 
 
 def agent_output_tool(agent: AgentName) -> dict[str, Any]:
