@@ -55,7 +55,21 @@ from src.orchestrator.schemas import (
 
 logger = logging.getLogger(__name__)
 
-CRITICAL_AGENTS: set[str] = {"question-framer", "data-retrieval-agent", "communication-agent"}
+# Agents whose failure should abort the entire pipeline (vs. skip-and-flag).
+# Rationale:
+#   - question-framer: without a pipeline composition, there's nothing to run.
+#   - data-retrieval-agent: without data loaded, the analytical agents have nothing.
+#   - data-profiler: every downstream analytical agent relies on its distribution
+#     classifications, free-text column lists, and resistant-statistics triggers.
+#     Running the analytical pipeline without the profile produces low-quality output
+#     and burns budget with no recipient-facing value. Hard-failing here saves money.
+#   - communication-agent: it's the final renderer; if it fails the recipient gets nothing.
+CRITICAL_AGENTS: set[str] = {
+    "question-framer",
+    "data-retrieval-agent",
+    "data-profiler",
+    "communication-agent",
+}
 
 
 @dataclass

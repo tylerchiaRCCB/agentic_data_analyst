@@ -140,10 +140,14 @@ StatisticKind = Literal[
     "other",             # legacy / unclassified — no enforcement
 ]
 
-# Kinds that REQUIRE both an effect_size and a confidence_interval per
-# statistical-rigor.md §2 ("full statistical picture"). The Validator's Layer 1
-# rejection of an effect-size-less group comparison is now a structural property
-# of the artifact, not a prompt-imposed convention.
+# Kinds that REQUIRE an effect_size per statistical-rigor.md §2
+# ("full statistical picture"). Effect-size discipline is the structural
+# property that cannot be missing. CI is strongly recommended but is NOT
+# hard-required at the artifact level because multi-group omnibus tests
+# (one-way ANOVA, Kruskal-Wallis) and many other legitimate analyses
+# don't naturally produce a clean CI on the test statistic. The Validator's
+# Layer 1 rigor check downgrades findings citing CI-less statistics rather
+# than rejecting the artifact outright.
 EFFECT_SIZE_REQUIRED_KINDS: frozenset[StatisticKind] = frozenset({
     "group_comparison", "correlation", "regression"
 })
@@ -175,21 +179,21 @@ class Statistic(StrictModel):
     def _enforce_required_fields_by_kind(self) -> "Statistic":
         """Structural rigor enforcement (statistical-rigor.md §2).
 
-        Group comparisons, correlations, and regressions MUST report effect size
-        and confidence interval. The validator's Layer 1 used to catch this; now
-        the artifact itself cannot exist without them. A finding cannot cite a
-        comparison statistic that lacks effect-size — no exceptions, no caveats.
+        Group comparisons, correlations, and regressions MUST report effect size.
+        That is the discipline that prevents fabricated "significant difference"
+        claims with no effect magnitude. CI is strongly recommended but NOT
+        rejected at the artifact layer — multi-group omnibus tests (ANOVA,
+        Kruskal-Wallis) and many other legitimate analyses don't produce a
+        clean CI on the test statistic. The Validator's Layer 1 rigor check
+        downgrades findings citing CI-less statistics with a required caveat,
+        which is the right tradeoff vs. rejecting the artifact and losing the
+        entire stage's analytical work.
         """
         if self.statistic_kind in EFFECT_SIZE_REQUIRED_KINDS:
             if self.effect_size is None:
                 raise ValueError(
                     f"Statistic id={self.id!r} kind={self.statistic_kind!r} requires "
                     f"effect_size (per statistical-rigor.md §2)."
-                )
-            if self.confidence_interval is None:
-                raise ValueError(
-                    f"Statistic id={self.id!r} kind={self.statistic_kind!r} requires "
-                    f"confidence_interval (per statistical-rigor.md §2)."
                 )
         return self
 

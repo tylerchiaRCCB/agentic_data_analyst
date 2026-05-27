@@ -231,22 +231,57 @@ def test_statistic_group_comparison_requires_effect_size() -> None:
     assert "effect_size" in str(exc.value)
 
 
-def test_statistic_correlation_requires_confidence_interval() -> None:
-    """A correlation statistic without confidence_interval raises ValidationError."""
-    from pydantic import ValidationError
-    from src.orchestrator.schemas import Statistic, LineageRef
-    with pytest.raises(ValidationError) as exc:
-        Statistic(
-            id="s1", metric="spearman_rho", value=-0.235,
-            computation="spearmanr(x, y)",
-            sample_size=97,
-            p_value=0.067,
-            effect_size={"kind": "spearman_rho", "value": -0.235},
-            # confidence_interval MISSING
-            statistic_kind="correlation",
-            lineage=LineageRef(source="dataset", data_slice="all", code_ref="cell_8"),
-        )
-    assert "confidence_interval" in str(exc.value)
+def test_statistic_correlation_accepts_missing_confidence_interval() -> None:
+    """CI is strongly recommended but NOT hard-required at the artifact layer.
+    Multi-group omnibus tests (Kruskal-Wallis, ANOVA) and many other legitimate
+    analyses don't naturally produce a clean CI on the test statistic. The
+    Validator's Layer 1 downgrades findings citing CI-less statistics rather
+    than rejecting them at the artifact layer.
+
+    See `_enforce_required_fields_by_kind` — effect_size is required; CI is not.
+    """
+    from src.orchestrator.schemas import LineageRef, Statistic
+    # Should validate without raising
+    s = Statistic(
+        id="s1", metric="spearman_rho", value=-0.235,
+        computation="spearmanr(x, y)",
+        sample_size=97,
+        p_value=0.067,
+        effect_size={"kind": "spearman_rho", "value": -0.235},
+        # confidence_interval intentionally MISSING — this used to raise; now it's OK
+        statistic_kind="correlation",
+        lineage=LineageRef(source="dataset", data_slice="all", code_ref="cell_8"),
+    )
+    assert s.confidence_interval is None  # accepted as optional
+
+
+def test_statistic_kruskal_wallis_omnibus_test_validates() -> None:
+    """Regression test for the actual failure mode: Kruskal-Wallis omnibus
+    test as a group_comparison Statistic, with eta_squared as effect size
+    and no CI. This is the legitimate analytical pattern for multi-group
+    distribution-difference tests. Used to reject at the artifact layer; now
+    accepted. See commit retrospective on Walmart-OGP first real run."""
+    from src.orchestrator.schemas import LineageRef, Statistic
+    s = Statistic(
+        id="stat_ftpr_category_kruskal",
+        metric="FTPR_RATE variation across 8 categories",
+        value=15182.9845,
+        computation="Kruskal-Wallis H-statistic across 8 product categories",
+        sample_size=100000,
+        p_value=0.0,
+        effect_size={"eta_squared": 0.151772},
+        confidence_interval=None,  # not naturally available for omnibus tests
+        statistic_kind="group_comparison",
+        correction_method="none-justified",
+        correction_notes="Single omnibus test across all categories; no further correction applied at profiling stage",
+        lineage=LineageRef(
+            source="synthetic_walmart.csv",
+            data_slice="all rows grouped by CATEGORY",
+            code_ref="stats.kruskal(*groups)",
+        ),
+    )
+    assert s.statistic_kind == "group_comparison"
+    assert s.effect_size == {"eta_squared": 0.151772}
 
 
 def test_statistic_other_kind_is_unenforced_for_backward_compat() -> None:
