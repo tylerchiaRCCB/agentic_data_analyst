@@ -42,9 +42,30 @@ def test_on_demand_skills_resolve() -> None:
     assert "output/proactive-action-card.md" in paths
 
 
-def test_missing_skill_raises() -> None:
-    with pytest.raises(FileNotFoundError):
-        assemble_prompt(agent_name="data-profiler", skills=["nonexistent-skill-xyz"])
+def test_missing_skill_is_permissive_and_surfaced() -> None:
+    """Question Framer can hallucinate skill names that don't exist in our repo.
+    Rather than hard-fail the whole pipeline, the framework skips missing skills
+    with a logged warning and tracks them in `missing_skills` so the executor
+    can surface them as a caveat. The agent proceeds without the missing skill."""
+    result = assemble_prompt(
+        agent_name="data-profiler",
+        skills=["nonexistent-skill-xyz", "another-fake-skill"],
+    )
+    assert result.missing_skills == ["nonexistent-skill-xyz", "another-fake-skill"]
+    # The prompt is still well-formed — universal + agent at minimum
+    assert "UNIVERSAL SKILLS" in result.system_prompt
+    assert "AGENT DEFINITION" in result.system_prompt
+
+
+def test_partial_missing_skills_load_what_exists() -> None:
+    """When some skills exist and some don't, the existing ones load and the
+    missing ones are surfaced."""
+    result = assemble_prompt(
+        agent_name="findings-validator",
+        skills=["statistical-revalidation", "this-skill-does-not-exist"],
+    )
+    assert "statistical-revalidation" in [s.split("/")[-1].replace(".md", "") for s in result.sections_loaded]
+    assert result.missing_skills == ["this-skill-does-not-exist"]
 
 
 def test_missing_domain_context_is_permissive() -> None:

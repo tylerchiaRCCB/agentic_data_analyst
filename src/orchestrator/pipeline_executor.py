@@ -359,6 +359,31 @@ class PipelineExecutor:
             if prompt.missing_domain_context and not getattr(self, "_missing_context_recorded", False):
                 self._record_missing_context(prompt)
 
+            # The Question Framer can request skills that don't exist in our repo
+            # (it doesn't have a registry of available skill names). Skipped skills
+            # are surfaced as a medium-severity caveat — the agent proceeds without
+            # them, but the recipient knows the analytical coverage was incomplete.
+            if prompt.missing_skills:
+                self.run_logger.warning(
+                    "Stage requested skills that don't exist in the repo; running without them",
+                    stage_index=stage_index,
+                    agent=agent,
+                    missing_skills=prompt.missing_skills,
+                )
+                pending = getattr(self, "_pending_run_caveats", None)
+                if pending is None:
+                    self._pending_run_caveats = []
+                    pending = self._pending_run_caveats
+                pending.append({
+                    "text": (
+                        f"Stage {agent} (stage {stage_index}) requested skills not present in the framework: "
+                        f"{', '.join(prompt.missing_skills)}. The agent ran without these — analytical "
+                        "coverage in those specific methods is reduced."
+                    ),
+                    "severity": "medium",
+                    "reason": "missing_skill",
+                })
+
             user_message_text = self._build_user_message(
                 agent=agent,
                 upstream_artifacts=upstream_artifacts,

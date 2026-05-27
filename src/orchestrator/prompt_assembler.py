@@ -80,6 +80,7 @@ class AssembledPrompt:
     universal_skills_sha256: str = ""
     agent_block_sha256: str = ""
     prompt_sha256: str = ""
+    missing_skills: list[str] = field(default_factory=list)
 
 
 def _sha256_hex(text: str) -> str:
@@ -124,18 +125,39 @@ def _resolve_skill(skill_name: str) -> Path:
     )
 
 
-def _load_skills(skill_names: list[str]) -> tuple[str, list[str]]:
+def _load_skills(skill_names: list[str]) -> tuple[str, list[str], list[str]]:
+    """Return (skills_block_text, loaded_paths, missing_skill_names).
+
+    The Question Framer can invent skill names that don't exist in our repo
+    (it doesn't have a registry of available skills). Rather than hard-fail
+    the run, we skip missing skills with a logged warning. The caller
+    surfaces them as a caveat. The agent loses a bit of context but
+    proceeds — strictly better than aborting the whole pipeline.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Drop any universal skills the agent listed by mistake — they're auto-loaded.
     on_demand = [n for n in skill_names if n not in UNIVERSAL_SKILL_NAMES]
     if not on_demand:
-        return "", []
+        return "", [], []
     parts: list[str] = ["\n\n---\n\n# ON-DEMAND SKILLS\n"]
     loaded: list[str] = []
+    missing: list[str] = []
     for name in on_demand:
-        path = _resolve_skill(name)
+        try:
+            path = _resolve_skill(name)
+        except FileNotFoundError:
+            logger.warning(
+                "Skill %r not found in repo; the requesting agent will run without it. "
+                "Question Framer may have hallucinated a skill name.",
+                name,
+            )
+            missing.append(name)
+            continue
         parts.append(f"\n\n---\n\n# {path.stem}\n\n{_read(path)}")
         loaded.append(f"{path.parent.name}/{path.name}")
-    return "".join(parts), loaded
+    return "".join(parts), loaded, missing
 
 
 def _load_domain_context(domain: str | None) -> tuple[str, list[str], bool, str | None]:
@@ -188,7 +210,7 @@ def assemble_prompt(
     agent_section_parts.append(f"\n\n---\n\n# AGENT DEFINITION — {agent_name}\n\n{agent_text}")
     loaded_paths.append(agent_path)
 
-    skills_text, skills_loaded = _load_skills(skills or [])
+    skills_text, skills_loaded, missing_skills = _load_skills(skills or [])
     agent_section_parts.append(skills_text)
     loaded_paths.extend(skills_loaded)
 
@@ -227,4 +249,5 @@ def assemble_prompt(
         universal_skills_sha256=_sha256_hex(universal_text),
         agent_block_sha256=_sha256_hex(agent_section_text),
         prompt_sha256=_sha256_hex(concatenated),
+        missing_skills=missing_skills,
     )
