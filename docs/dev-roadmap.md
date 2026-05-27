@@ -105,6 +105,30 @@ to the recipient's preferred channel.
   Automate or Graph API); ~1 day for Slack.
 - **Trigger:** Production rollout.
 
+### Tiered notification + drill-through to full report
+The current Communication Agent renders ONE comprehensive markdown per run
+(~20-30KB). That's appropriate as the source-of-truth output, but it's too
+much for the typical end user — Account Managers, plant leads, and
+functional leaders won't read a 30KB markdown to find the 1-2 things
+relevant to them.
+- **What's needed:** A two-tier delivery model. Tier 1 = concise
+  notification (the TL;DR + just the cards relevant to that recipient),
+  delivered via Slack/email/Teams. Tier 2 = the full report, accessible
+  via a clickable link in the notification (initially: link to the
+  markdown in shared storage; eventually: a web UI with filtering).
+- **Why it matters:** Recipient attention is the framework's currency.
+  Asking a regional VP to read 30KB of methodology to find his 3 stores
+  destroys the value prop. The TL;DR exists for exactly this reason
+  but the current rendering still includes the full body.
+- **Why deferred:** The right tiered format comes from end-user feedback
+  on real usage, not from speculation. Once the team has 2-3 weeks of
+  recipients actually reading these, the right summary length, fields,
+  and structure will be obvious. Designing it now is premature.
+- **Effort:** ~2-3 days once design is settled. The Communication Agent
+  already has the per-card structured output; the work is generating
+  the short-form rendering + handling the routing.
+- **Trigger:** After 2-3 weeks of recipient feedback in production.
+
 ---
 
 ## Performance & reliability

@@ -57,6 +57,35 @@ The grade itself doesn't change by tier — a grade-B finding is grade-B regardl
 2. **Render once per tier, not once per finding.** When a finding has multiple recipients across tiers, the Communication Agent renders the card N times with N tier calibrations.
 3. **Aggregate where the tier expects aggregation.** A manager's summary should not be the IC card with the contact line removed; it should be a manager-tier render that reasons across their span.
 4. **Never invent detail at higher tiers.** Executive-level framings should *compress* what's known, not *speculate* beyond it. If the IC card says *"likely driven by delivery-window changes,"* the executive card doesn't escalate that to *"clear operational failure"* — it preserves the original calibration.
+5. **Default to plain business English.** Recipients are operational decision-makers, not analysts. Technical / statistical / data-science jargon belongs in the `<details>` Methodology footer, not in the body of cards or summaries. If a term cannot be replaced by a common English phrase, define it on first use.
+
+## Plain-language translation (mandatory)
+
+The following technical or data-analysis terms commonly leak into agent emissions. Translate them in the body of any recipient-facing render. Methodology footers can use the original term, with the plain version cited if helpful.
+
+| Don't say (in the body) | Do say |
+|---|---|
+| "sentinel store" / "sentinel score" / "sentinel value" | "test/placeholder store" or "data-quality flag suggesting this isn't a real production store" |
+| "phantom inventory" *(if the recipient isn't supply-chain native)* | "items the system thinks are in stock but aren't physically available" |
+| "cohort" *(in general business context)* | "group" or name the actual group (e.g., "these 15 stores") |
+| "regime shift" / "structural break" / "change point" | "a clear before-and-after change starting on {date}" |
+| "stationarity" / "non-stationary series" | "the pattern is stable over time" / "the pattern is shifting over time" |
+| "omnibus test" | "an overall test for any difference" |
+| "Kruskal-Wallis" / "Mann-Whitney" / "ANOVA" / "chi-squared" | "we compared the groups and found {result}" |
+| "effect size" / "Cohen's d" / "eta-squared" / "Cramér's V" | "the size of the difference, in plain terms: {restated in business units}" |
+| "p-value" / "α = 0.05" / "statistically significant" | "highly unlikely to be random chance" or specific business-relevant restatement |
+| "confidence interval" / "95% CI" | "we estimate the true value is between X and Y" |
+| "Bonferroni" / "Benjamini-Hochberg" / "multiple-comparison correction" | "we adjusted for testing many things at once" |
+| "Spearman ρ" / "Pearson r" / "correlation coefficient" | "{X} and {Y} tend to move together" / "in opposite directions" with a magnitude word ("strongly", "modestly", "barely") |
+| "modified z-score" / "Mahalanobis distance" | "how far this is from the typical pattern" |
+| "STL decomposition" / "seasonal decomposition" | "after removing the seasonal pattern, the underlying trend shows {X}" |
+| "achieved power" / "underpowered" | "we have enough data to detect a difference of size X" / "we don't have enough data to be sure" |
+| "Simpson's Paradox" / "Yule-Simpson effect" | "the picture looks different when we break it down by {dimension}" |
+| "associational" *(in a finding's language)* | "appears connected to" / "moves together with" |
+| "primary driver" / "explanatory factor" *(when used as a noun in itself)* | "the main reason" / "the biggest contributor" |
+| "data slice" *(in body text)* | the actual scope — e.g., "Northeast region during the holiday period" |
+
+The general rule: **if a typical business reader (Account Manager, plant manager, sales lead) would need to Google a word to understand it, replace it.** Specific domain terms the business uses (e.g., FTPR, nil-pick rate, KO/WM attribution) ARE business English and should be preserved — they're the language of the recipient, not jargon imposed on them.
 
 ## When the stakeholder map doesn't specify
 
