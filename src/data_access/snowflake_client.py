@@ -73,6 +73,7 @@ class SnowflakeConfig:
     database: str
     schema: str
     private_key: str | None = None  # base64-encoded
+    private_key_bytes: bytes | None = None  # DER-encoded (from team's snowflake_module)
     password: str | None = None
     mock_mode: bool = False
 
@@ -119,6 +120,84 @@ class SnowflakeConfig:
             schema=os.environ["SNOWFLAKE_SCHEMA"],
             private_key=priv,
             password=pwd,
+        )
+
+    @classmethod
+    def from_team_keyvault(
+        cls,
+        *,
+        database: str = "CCB_DATASCIENCE_DEV",
+        schema: str = "PUBLIC",
+    ) -> "SnowflakeConfig":
+        """Load credentials from Azure Key Vault using the team's snowflake_module.
+
+        Uses the RCCB Data Science team's standard auth pattern:
+        - AKV secrets: snowflake-etl-username, snowflake-etl-private-key-raw,
+          snowflake-etl-private-key-passphrase
+        - Private key auth with passphrase-protected PEM key
+        - Account: reyesholdings.east-us-2.azure
+
+        Parameters:
+          database:  Snowflake database to connect to (default: CCB_DATASCIENCE_DEV)
+          schema:    Snowflake schema (default: PUBLIC)
+        """
+        mock = os.environ.get("SNOWFLAKE_MOCK", "").lower() in {"1", "true", "yes"}
+        if mock:
+            return cls(
+                account="mock",
+                user="mock",
+                warehouse="mock_wh",
+                role="mock_role",
+                database="MOCK_DB",
+                schema="ANALYTICS",
+                mock_mode=True,
+            )
+
+        try:
+            from azure.identity import AzureCliCredential, DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import serialization
+        except ImportError as e:
+            raise NoCredentialsConfigured(
+                f"Missing required package for team AKV auth: {e}. "
+                "Install azure-identity, azure-keyvault-secrets, and cryptography."
+            ) from e
+
+        vault_url = "https://glccbdsdevkv.vault.azure.net/"
+        try:
+            credential = DefaultAzureCredential()
+            secret_client = SecretClient(vault_url=vault_url, credential=credential)
+            secret_client.get_secret("snowflake-etl-username")  # verify access
+        except Exception:
+            credential = AzureCliCredential()
+            secret_client = SecretClient(vault_url=vault_url, credential=credential)
+
+        username = secret_client.get_secret("snowflake-etl-username").value
+        private_key_pem = secret_client.get_secret("snowflake-etl-private-key-raw").value
+        passphrase = secret_client.get_secret("snowflake-etl-private-key-passphrase").value
+
+        private_key = serialization.load_pem_private_key(
+            private_key_pem.encode(),
+            password=passphrase.encode(),
+            backend=default_backend(),
+        )
+        pk_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        logger.info("Loaded Snowflake credentials from Azure Key Vault (team pattern)")
+
+        return cls(
+            account="reyesholdings.east-us-2.azure",
+            user=username,
+            warehouse="CCB_DATASCIENCE_S_WH",
+            role="CCB_DATASCIENCE_SNOWFLAKE",
+            database=database,
+            schema=schema,
+            private_key_bytes=pk_bytes,
         )
 
 
@@ -168,7 +247,10 @@ class SnowflakeClient:
             "database": self.config.database,
             "schema": self.config.schema,
         }
-        if self.config.private_key:
+        if self.config.private_key_bytes:
+            # Team pattern: DER-encoded bytes from AKV-sourced PEM + passphrase
+            conn_args["private_key"] = self.config.private_key_bytes
+        elif self.config.private_key:
             # Real impl: decode + load private key per snowflake-connector docs
             conn_args["private_key"] = self.config.private_key
         else:

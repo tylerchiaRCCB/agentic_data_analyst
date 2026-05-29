@@ -1,7 +1,7 @@
-# Walmart OGP — Nil-Pick & First Time Pick Rate (FTPR)
+# Walmart OPD — Nil-Pick & First Time Pick Rate (FTPR)
 
 ## Data Source
-Walmart Luminate / Retail Link — Online Grocery Pickup (OGP) order fulfillment data for RCCB (Reyes Coca-Cola Bottling) products.
+Walmart Luminate / Retail Link — Online, Pickup, and Delivery (OPD) order fulfillment data for RCCB (Reyes Coca-Cola Bottling) products.
 
 ## Grain
 One row = one **UPC × Store × Date**. `DATE_SID` is an integer date key in `YYYYMMDD` format.
@@ -38,7 +38,7 @@ One row = one **UPC × Store × Date**. `DATE_SID` is an integer date key in `YY
 | `ORIGINAL_UPC` | Product UPC identifier |
 
 ## Business Context
-- **FTPR** (First Time Pick Rate) is the primary OGP service metric. Higher is better. Target is typically ≥ 95%.
+- **FTPR** (First Time Pick Rate) is the primary OPD service metric. Higher is better. Target is typically ≥ 95%.
 - **Nil-picks** are failed picks — the item was ordered but not available on the shelf at pick time. Lower is better.
 - Nil-picks can be attributed to **KO responsibility** (supplier didn't deliver / out of stock at DC) or **Walmart responsibility** (store didn't shelve / phantom inventory).
 - Nil Pick rate can be calculated as SCHDL_NIL_PICK_RATE_NMRTR / SCHDL_NIL_PICK_RATE_DNMNTR

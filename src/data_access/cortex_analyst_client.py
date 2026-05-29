@@ -112,17 +112,25 @@ class CortexAnalystClient:
         *,
         question: str,
         semantic_model: str,
-        limit: int | None = 100000,
+        semantic_view: str | None = None,
+        limit: int | None = 1_000_000,
+        query_timeout_seconds: int = 180,
     ) -> CortexAnalystResponse:
         """Submit a natural-language analytical question to Cortex Analyst.
 
         Parameters:
           question:        the analytical question (e.g. "weekly fill rate by DC
                            for the past 13 weeks").
-          semantic_model:  the semantic model name (e.g. "supply_chain"). The
-                           YAML file must exist at
-                           context/semantic_models/<semantic_model>.yaml.
+          semantic_model:  the semantic model name (e.g. "supply_chain"). Used
+                           as a label and to locate the YAML when sending inline.
+          semantic_view:   fully-qualified semantic view reference
+                           (e.g. "CCB_DATASCIENCE_DEV.WALMART_OPD.WALMART_OPD").
+                           When provided, the API uses the server-side view
+                           instead of sending YAML inline.
           limit:           row limit to apply (caps cost + token use downstream).
+          query_timeout_seconds: max seconds for the generated SQL to execute
+                           before Snowflake kills it. Prevents runaway full-table
+                           scans. Default 60s.
 
         Returns CortexAnalystResponse with the generated SQL, the resulting
         DataFrame, and any quality warnings.
@@ -134,20 +142,136 @@ class CortexAnalystClient:
         if self.mock_mode:
             return self._mock_response(question, semantic_model, limit)
 
-        # Real-mode implementation. Cortex Analyst is invoked via REST against
-        # the account's Snowflake endpoint. The exact endpoint, auth, and
-        # payload shape are documented at:
-        #
-        #   https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst
-        #
-        # This stub raises NotImplementedError until production credentials and
-        # the semantic model are in place. The interface above is stable; only
-        # the body of this branch will change when we wire the real call.
-        raise NotImplementedError(
-            "CortexAnalystClient.ask() real-mode is not yet wired. Set "
-            "SNOWFLAKE_MOCK=1 for scaffolding mode, or implement the REST call "
-            "against https://<account>.snowflakecomputing.com/api/v2/cortex/analyst/message "
-            "once production credentials and the semantic model are in place."
+        # ---- Real-mode: call Cortex Analyst REST API ----
+        import requests
+
+        conn = self._snowflake.connect()
+        # Get a session token from the active Snowflake connection
+        token = conn.rest.token
+        account = self._snowflake.config.account
+
+        # Build the REST endpoint URL
+        # Account locator keeps dots: "reyesholdings.east-us-2.azure" → host is same
+        url = f"https://{account}.snowflakecomputing.com/api/v2/cortex/analyst/message"
+
+        # Build payload — prefer semantic_view when available, else send YAML inline
+        if semantic_view:
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": question}],
+                    }
+                ],
+                "semantic_view": semantic_view,
+            }
+        else:
+            # Load the semantic model YAML from context/semantic_models/ and send inline
+            model_path = SEMANTIC_MODELS_DIR / f"{semantic_model}.yaml"
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Semantic model not found: {model_path}. "
+                    f"Available: {self.list_semantic_models()}"
+                )
+            with model_path.open() as f:
+                semantic_model_yaml = f.read()
+
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": question}],
+                    }
+                ],
+                "semantic_model": semantic_model_yaml,
+            }
+
+        headers = {
+            "Authorization": f'Snowflake Token="{token}"',
+            "Content-Type": "application/json",
+        }
+
+        source = f"semantic_view={semantic_view}" if semantic_view else f"model={semantic_model}"
+        logger.info(
+            "Calling Cortex Analyst: %s question=%s",
+            source, question[:120],
+        )
+        resp = requests.post(url, json=payload, headers=headers, timeout=120)
+        resp.raise_for_status()
+        result = resp.json()
+
+        # Parse response: extract SQL statement and any text/warnings
+        request_id = result.get("request_id", "unknown")
+        content_blocks = result.get("message", {}).get("content", [])
+        warnings_raw = result.get("warnings", [])
+        warnings = [w.get("message", str(w)) for w in warnings_raw]
+
+        generated_sql = ""
+        for block in content_blocks:
+            if block.get("type") == "sql":
+                generated_sql = block.get("statement", "")
+            elif block.get("type") == "suggestions":
+                # Cortex couldn't generate SQL — question was ambiguous
+                suggestions = block.get("suggestions", [])
+                warnings.append(
+                    f"Cortex Analyst returned suggestions instead of SQL. "
+                    f"Try one of: {suggestions}"
+                )
+
+        if not generated_sql:
+            logger.warning("Cortex Analyst returned no SQL for question: %s", question)
+            return CortexAnalystResponse(
+                generated_sql="-- No SQL generated",
+                dataframe=pd.DataFrame(),
+                rows_returned=0,
+                semantic_model=semantic_model,
+                request_id=request_id,
+                warnings=warnings or ["No SQL statement returned by Cortex Analyst."],
+            )
+
+        # Apply row limit only if the generated SQL doesn't already have one
+        sql_upper = generated_sql.upper()
+        has_limit = "LIMIT" in sql_upper.split("--")[0].rsplit("ORDER", 1)[-1] if "LIMIT" in sql_upper else False
+        if limit and not has_limit:
+            exec_sql = f"{generated_sql.rstrip().rstrip(';')}\nLIMIT {limit}"
+        else:
+            exec_sql = generated_sql.rstrip().rstrip(';')
+
+        # Execute the generated SQL via the Snowflake connection
+        logger.info("Executing Cortex-generated SQL (%d chars)", len(exec_sql))
+        cursor = conn.cursor()
+        try:
+            # Set per-statement timeout to kill runaway full-table scans
+            cursor.execute(
+                f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {query_timeout_seconds}"
+            )
+            cursor.execute(exec_sql)
+            columns = [col[0].upper() for col in cursor.description]
+            rows = cursor.fetchall()
+            df = pd.DataFrame(rows, columns=columns)
+        finally:
+            cursor.close()
+
+        # Guard: warn if result set is unexpectedly large
+        if limit and len(df) >= limit:
+            warnings.append(
+                f"Result was capped at {limit:,} rows. The full result set may be larger. "
+                f"Consider narrowing your question with a date range or category filter."
+            )
+            logger.warning("Result hit row limit (%d rows)", limit)
+
+        logger.info(
+            "Cortex Analyst returned %d rows, %d columns",
+            len(df), len(df.columns),
+        )
+
+        return CortexAnalystResponse(
+            generated_sql=generated_sql,
+            dataframe=df,
+            rows_returned=len(df),
+            semantic_model=semantic_model,
+            request_id=request_id,
+            warnings=warnings,
         )
 
     def _mock_response(

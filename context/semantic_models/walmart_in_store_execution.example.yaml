@@ -12,7 +12,7 @@
 name: walmart_in_store_execution
 description: |
   Walmart In-Store Execution — measures how well our products perform at
-  the shelf, with the digital order assembly flow (OGP / pickup), and the
+  the shelf, with the digital order assembly flow (OPD / pickup), and the
   retailer's first-time pick rate. Updated daily from the Retail Link
   export. Owned by Walmart Sales Execution.
 

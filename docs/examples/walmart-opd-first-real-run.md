@@ -1,4 +1,4 @@
-# Walmart OGP Fulfillment Report — RCCB Portfolio — Jul 2025 to Jun 2026
+# Walmart OPD Fulfillment Report — RCCB Portfolio — Jul 2025 to Jun 2026
 
 ## TL;DR
 - **FTPR slope accelerated 4.1× at 15 specific stores starting late Feb 2026 — dropping their FTPR ~7pp in 14 weeks; intact 109-store portfolio is flat** (Grade A)
@@ -27,15 +27,15 @@
 
 **Why this matters.** The portfolio's first-time pick rate has declined at 4.1× the prior-year pace since late March 2026, with 88% of stores now below the ≥95% FTPR target. But this apparent network-wide crisis is not network-wide: the 109 intact stores are unchanged (early 93.9%, late 93.9%), while 15 stores dropped from 92.9% to 86.0% in a staggered 5-week window. Whatever happened to these 15 stores — a system change, a picking-process rollout, a staffing restructure, or a DC-level change — is the single lever that would reverse the trend. At these stores, nil-pick frequency jumped from 76% to 93% of UPC-week rows; the problem is more frequent stock-outs at pick time, not larger individual events.
 
-**Root cause.** The decline is strongly associated with a store-operational event localized to stores with IDs in the 442–2459 range. Category-uniformity rules out product or supplier causes: all 8 categories declined by −6.8 to −7.5pp within these stores (and zero categories declined significantly in the intact cohort). WM attribution rose 14.7pp in the broken cohort vs 1.7pp in intact stores, pointing to store-side execution rather than RCCB supply failures. The specific trigger — a system migration, OGP-process change, staffing restructure, or DC serving this cluster — is not observable in the dataset and requires operational metadata to confirm.
+**Root cause.** The decline is strongly associated with a store-operational event localized to stores with IDs in the 442–2459 range. Category-uniformity rules out product or supplier causes: all 8 categories declined by −6.8 to −7.5pp within these stores (and zero categories declined significantly in the intact cohort). WM attribution rose 14.7pp in the broken cohort vs 1.7pp in intact stores, pointing to store-side execution rather than RCCB supply failures. The specific trigger — a system migration, OPD-process change, staffing restructure, or DC serving this cluster — is not observable in the dataset and requires operational metadata to confirm.
 
-**Recommended action.** Identify the shared operational characteristic of stores 442, 554, 732, 947, 1205, 1301, 1489, 1622, 1780, 1903, 2015, 2126, 2237, 2348, and 2459. Pull their district, region, DC assignment, and any OGP-related change log from the relevant week range (2026-02-23 to 2026-03-30). Share this store list with the Walmart field/customer team and request the store-operations context. If a common rollout or system change is identified, escalate to the WM customer team VP to discuss remediation — the customer-side FTPR impact at these stores is 6.8pp below the intact cohort.
+**Recommended action.** Identify the shared operational characteristic of stores 442, 554, 732, 947, 1205, 1301, 1489, 1622, 1780, 1903, 2015, 2126, 2237, 2348, and 2459. Pull their district, region, DC assignment, and any OPD-related change log from the relevant week range (2026-02-23 to 2026-03-30). Share this store list with the Walmart field/customer team and request the store-operations context. If a common rollout or system change is identified, escalate to the WM customer team VP to discuss remediation — the customer-side FTPR impact at these stores is 6.8pp below the intact cohort.
 
 | | |
 |---|---|
-| **Owner** | RCCB Walmart Customer Team Lead (OGP) |
+| **Owner** | RCCB Walmart Customer Team Lead (OPD) |
 | **Due** | Within 5 business days of this report |
-| **Follow-up trigger** | If next 4-week run shows broken-cohort FTPR recovering toward 92%+, mark as self-correcting and monitor. If still ≤87%, escalate to WM National Account VP and request a formal joint business review on OGP execution at these stores. |
+| **Follow-up trigger** | If next 4-week run shows broken-cohort FTPR recovering toward 92%+, mark as self-correcting and monitor. If still ≤87%, escalate to WM National Account VP and request a formal joint business review on OPD execution at these stores. |
 
 > ⚠️ **Caveats:** (1) Root cause is inferred from pattern (staggered onset, store-ID clustering, category uniformity, nil-pick frequency surge, WM-flag dominance) — the triggering event is not observed in the data; operational metadata required for confirmation. (2) Broken-cohort was identified post-hoc from a bimodal store-delta distribution; cohort definition is data-driven, not pre-specified. (3) No prior-year data; the Feb–Mar timing may be a recurring seasonal disruption rather than a novel event. (4) Clean uniformity of step pattern across all 8 categories is consistent with synthetic data generation; validate against production data before committing resources.
 
@@ -50,7 +50,7 @@ xychart-beta
 <details>
 <summary>Methodology & lineage</summary>
 
-- **Source:** synthetic_walmart.csv (walmart_ogp_synthetic_v1) | run 2026-06-29
+- **Source:** synthetic_walmart.csv (walmart_opd_synthetic_v1) | run 2026-06-29
 - **Change-point detection:** BIC-penalized two-segment regression; BIC delta vs single linear = 44.32 (Kass-Raftery threshold >10 = strong). Pre-break slope = −0.000110/week (n=38), post-break = −0.000447/week (n=14); acceleration ratio 4.1×. Both segments individually significant (p<0.001). Cross-validated: NIL_PICK_RATE shows identical split with 3.9× acceleration.
 - **DiD design:** Broken cohort = 15 stores with per-store FTPR delta <−0.03pp. Intact = 109 stores (excl. 9999). DiD = (0.86021 − 0.92853) − (0.93906 − 0.93923) = −0.06814. Cluster-bootstrap 95% CI: [−0.06943, −0.06701]. Wilcoxon paired p=3.05e−05.
 - **Category uniformity:** BH-corrected MWU tests (q=0.10) for all 8 categories within broken cohort — all 8 significant (deltas −6.8 to −7.5pp). Zero categories significant in intact cohort (all p_adj>0.20).
@@ -69,17 +69,17 @@ xychart-beta
 
 **Confidence:** A
 
-**Why this matters.** Every other category in the portfolio is within 1.2pp of each other. ENERGY is 5.5pp below the nearest competitor (SSD at 0.944) and 7.3pp below the 95% service target as of the week ending June 29, 2026. The two worst UPCs — 70847811237 and 70847811442 — show median FTPR of 0.880 at 88 out of 125 stores, confirming this is a supply-level or DC-level problem, not a handful of isolated store issues. ENERGY nil-pick rate (8.3%) runs at 2× non-ENERGY (4.1%), meaning roughly 1 in 12 ENERGY units ordered through OGP goes unfulfilled on the first pick attempt. Post-substitution is also rising across the portfolio (+0.000398/wk), which masks the true severity of ENERGY out-of-stocks in aggregate metrics.
+**Why this matters.** Every other category in the portfolio is within 1.2pp of each other. ENERGY is 5.5pp below the nearest competitor (SSD at 0.944) and 7.3pp below the 95% service target as of the week ending June 29, 2026. The two worst UPCs — 70847811237 and 70847811442 — show median FTPR of 0.880 at 88 out of 125 stores, confirming this is a supply-level or DC-level problem, not a handful of isolated store issues. ENERGY nil-pick rate (8.3%) runs at 2× non-ENERGY (4.1%), meaning roughly 1 in 12 ENERGY units ordered through OPD goes unfulfilled on the first pick attempt. Post-substitution is also rising across the portfolio (+0.000398/wk), which masks the true severity of ENERGY out-of-stocks in aggregate metrics.
 
 **Root cause.** The breadth of impact across stores rules out store-specific causes. KO attribution for ENERGY nil-picks (33.7%) is statistically indistinguishable from other categories (33.3–35.2%), so the flag data alone does not point cleanly to supplier-side delivery failures vs Walmart shelf-replenishment failures. The FTPR↔NIL correlation is weaker in ENERGY (Spearman ρ=−0.842) than non-ENERGY (ρ=−0.944), suggesting additional variance drivers in ENERGY beyond measured nil-pick rate — potentially substitution patterns, multi-event nil picks, or supply constraints at the DC level. The problem has been persistent for 52 weeks, ruling out a single-event cause.
 
-**Recommended action.** For UPCs 70847811237 and 70847811442 specifically: pull DC fill rates, order-to-ship cycle times, and on-hand inventory snapshots for these two SKUs from the RCCB supply chain system, and compare against the other 3 ENERGY UPCs in the portfolio. Identify whether the ~4-unit median nil-pick quantity at pick time reflects a DC replenishment gap, a case-count ordering mismatch, or a WM shelf-replenishment failure. Present findings to the WM OGP buyer and the RCCB supply chain planner jointly within 10 business days.
+**Recommended action.** For UPCs 70847811237 and 70847811442 specifically: pull DC fill rates, order-to-ship cycle times, and on-hand inventory snapshots for these two SKUs from the RCCB supply chain system, and compare against the other 3 ENERGY UPCs in the portfolio. Identify whether the ~4-unit median nil-pick quantity at pick time reflects a DC replenishment gap, a case-count ordering mismatch, or a WM shelf-replenishment failure. Present findings to the WM OPD buyer and the RCCB supply chain planner jointly within 10 business days.
 
 | | |
 |---|---|
-| **Owner** | RCCB Supply Chain Planner (ENERGY SKUs) + Walmart OGP Category Buyer |
+| **Owner** | RCCB Supply Chain Planner (ENERGY SKUs) + Walmart OPD Category Buyer |
 | **Due** | Within 10 business days |
-| **Follow-up trigger** | If next run shows ENERGY FTPR ≥ 92% (a 3pp improvement), monitor monthly. If ENERGY FTPR remains below 90% for 2 more consecutive runs, escalate to VP level and consider OGP assortment review for worst-performing UPCs. |
+| **Follow-up trigger** | If next run shows ENERGY FTPR ≥ 92% (a 3pp improvement), monitor monthly. If ENERGY FTPR remains below 90% for 2 more consecutive runs, escalate to VP level and consider OPD assortment review for worst-performing UPCs. |
 
 > ⚠️ **Caveats:** (1) KO attribution rate for ENERGY nil-picks (33.7%) is statistically indistinguishable from other categories — the ENERGY gap cannot be cleanly attributed to supplier vs Walmart causes from flag data alone. (2) Attribution flags show a suspiciously clean 34%/66% KO/WM split with zero co-occurrences; proportions should be treated as directional only. (3) No prior-year data; the structural ENERGY gap may predate this dataset. (4) The weaker FTPR↔NIL correlation in ENERGY (Δρ=−0.101 vs non-ENERGY) implies unmeasured variance drivers not identifiable from this dataset alone.
 
@@ -113,17 +113,17 @@ xychart-beta
 
 **Confidence:** B
 
-**Why this matters.** Phantom inventory means the Walmart OGP system believes product is on the shelf, dispatches a picker, and the picker arrives to find nothing there. The 10.5× concentration of these events at just three stores — while all other 121 stores run at 5% or below — points to a systemic inventory record accuracy problem at these locations, not a product availability issue. The FTPR impact (−4.4pp vs portfolio) is real but secondary; the operational cost in labor (wasted pick trips), customer experience (unfulfilled orders), and escalating substitution activity is the primary concern. Fixing shelf-inventory accuracy at these three stores would be expected to close most of the FTPR gap.
+**Why this matters.** Phantom inventory means the Walmart OPD system believes product is on the shelf, dispatches a picker, and the picker arrives to find nothing there. The 10.5× concentration of these events at just three stores — while all other 121 stores run at 5% or below — points to a systemic inventory record accuracy problem at these locations, not a product availability issue. The FTPR impact (−4.4pp vs portfolio) is real but secondary; the operational cost in labor (wasted pick trips), customer experience (unfulfilled orders), and escalating substitution activity is the primary concern. Fixing shelf-inventory accuracy at these three stores would be expected to close most of the FTPR gap.
 
 **Root cause.** Clustering analysis (k=2 KMeans, silhouette=0.79, ARI=1.0 across 5 seeds) identified these three stores as a structurally distinct cluster, with phantom-inventory flag rate as the primary differentiating feature. WM attribution dominates their nil-pick rows (~61% WM vs ~52% in the rest of the portfolio), consistent with a Walmart store-side inventory record accuracy failure rather than a supplier delivery shortfall. The mechanism is store-operational: on-hand records show available stock, picks are attempted, items are absent.
 
-**Recommended action.** Request a Walmart field audit at stores 613, 942, and 4746 to reconcile OGP system on-hand records against physical shelf inventory for RCCB products during the next scheduled OGP pick window. Focus on the top 5 RCCB UPCs by nil-pick count at these stores. If phantom inventory is confirmed, engage the Walmart store operations team to schedule an inventory cycle count correction and review their auto-replenishment trigger logic for these items.
+**Recommended action.** Request a Walmart field audit at stores 613, 942, and 4746 to reconcile OPD system on-hand records against physical shelf inventory for RCCB products during the next scheduled OPD pick window. Focus on the top 5 RCCB UPCs by nil-pick count at these stores. If phantom inventory is confirmed, engage the Walmart store operations team to schedule an inventory cycle count correction and review their auto-replenishment trigger logic for these items.
 
 | | |
 |---|---|
 | **Owner** | RCCB Walmart Field Team / Customer Development Manager (stores 613, 942, 4746 region) |
 | **Due** | Within 10 business days |
-| **Follow-up trigger** | If PI flag rate at these stores drops below 20% on the next run, mark as responding to intervention. If PI flag rate remains above 40% after 4 weeks, escalate to Walmart OGP Regional Director. |
+| **Follow-up trigger** | If PI flag rate at these stores drops below 20% on the next run, mark as responding to intervention. If PI flag rate remains above 40% after 4 weeks, escalate to Walmart OPD Regional Director. |
 
 > ⚠️ **Caveats:** (1) PI flag rate of ~53% is implausibly high for real-world phantom inventory — this magnitude is consistent with synthetic data generation logic and should be treated as an upper bound. Investigate qualitatively before acting on the specific percentage. (2) Attribution flags show suspiciously clean mutual exclusivity (KO and WM never co-occur on any row in the dataset), which is flagged as a likely synthetic data artifact. Attribution directionality is valid; precise proportions are uncertain.
 
@@ -152,23 +152,23 @@ xychart-beta
 
 ### Card 4 — Store 9999: Median FTPR 0.6875 — 25pp Below Portfolio — Verify Operational Status Before Acting
 
-> **Store 9999 has a median FTPR of 0.6875 across all 52 weeks and all 8 product categories — 25pp below the portfolio median of 0.9423. However, "9999" is a non-standard store identifier inconsistent with all other stores in the dataset, and this store is most likely a test/sentinel record rather than a real Walmart OGP location.**
+> **Store 9999 has a median FTPR of 0.6875 across all 52 weeks and all 8 product categories — 25pp below the portfolio median of 0.9423. However, "9999" is a non-standard store identifier inconsistent with all other stores in the dataset, and this store is most likely a test/sentinel record rather than a real Walmart OPD location.**
 
 **Confidence:** B
 
-**Why this matters.** If Store 9999 is a real, active OGP location, its FTPR gap of 25.5pp is the most severe in the portfolio by a wide margin — every category at this store has FTPR in the 0.68–0.70 range, which is unlike any product-specific or operational pattern seen elsewhere. The uniform cross-category failure signature suggests a store-level operational collapse: receiving failures, OGP program inactivity, or a DC-level disruption. However, the non-standard identifier "9999" (all other 124 stores use 3-5 digit realistic IDs) strongly suggests this is a data sentinel, test record, or placeholder row generated for systems testing purposes. Acting on this finding without validation would be a waste of time if the store doesn't exist.
+**Why this matters.** If Store 9999 is a real, active OPD location, its FTPR gap of 25.5pp is the most severe in the portfolio by a wide margin — every category at this store has FTPR in the 0.68–0.70 range, which is unlike any product-specific or operational pattern seen elsewhere. The uniform cross-category failure signature suggests a store-level operational collapse: receiving failures, OPD program inactivity, or a DC-level disruption. However, the non-standard identifier "9999" (all other 124 stores use 3-5 digit realistic IDs) strongly suggests this is a data sentinel, test record, or placeholder row generated for systems testing purposes. Acting on this finding without validation would be a waste of time if the store doesn't exist.
 
-**Root cause.** Store-level operational failure — or a synthetic data artifact. The pattern (uniform FTPR ~0.69 across all 8 categories, WM attribution dominant at 62%) is consistent with a real OGP store that has largely stopped functioning. But the non-standard identifier makes validation mandatory before any action.
+**Root cause.** Store-level operational failure — or a synthetic data artifact. The pattern (uniform FTPR ~0.69 across all 8 categories, WM attribution dominant at 62%) is consistent with a real OPD store that has largely stopped functioning. But the non-standard identifier makes validation mandatory before any action.
 
-**Recommended action.** Check Walmart Luminate store master data: confirm whether store number 9999 corresponds to an active Walmart OGP location. If it does not exist as an active store, flag it for exclusion from all future data pulls and notify the data engineering team to filter this sentinel from the extract. If it IS a real store, treat as a critical escalation (Grade A finding) and engage the WM field team immediately.
+**Recommended action.** Check Walmart Luminate store master data: confirm whether store number 9999 corresponds to an active Walmart OPD location. If it does not exist as an active store, flag it for exclusion from all future data pulls and notify the data engineering team to filter this sentinel from the extract. If it IS a real store, treat as a critical escalation (Grade A finding) and engage the WM field team immediately.
 
 | | |
 |---|---|
 | **Owner** | RCCB Data Engineering / Walmart Account Analytics Team |
 | **Due** | Within 3 business days |
-| **Follow-up trigger** | If store 9999 confirmed as real and active: escalate to WM National Account team immediately, re-grade this finding to A, and initiate a store-level OGP operations review. If confirmed as a test/sentinel: exclude from all future runs and close this finding. |
+| **Follow-up trigger** | If store 9999 confirmed as real and active: escalate to WM National Account team immediately, re-grade this finding to A, and initiate a store-level OPD operations review. If confirmed as a test/sentinel: exclude from all future runs and close this finding. |
 
-> ⚠️ **Caveats:** (1) STORE_NBR=9999 is a non-standard identifier — all other 124 stores use 3-5 digit realistic values. High probability this is a synthetic data sentinel or test/placeholder record, not a real Walmart OGP location. (2) Even if real, no prior-year data is available to determine whether this represents chronic underperformance or a recent event. (3) No temporal decomposition of store 9999 performance was conducted; the uniform ~0.69 FTPR across all 52 weeks and 8 categories is itself consistent with synthetic-data generation.
+> ⚠️ **Caveats:** (1) STORE_NBR=9999 is a non-standard identifier — all other 124 stores use 3-5 digit realistic values. High probability this is a synthetic data sentinel or test/placeholder record, not a real Walmart OPD location. (2) Even if real, no prior-year data is available to determine whether this represents chronic underperformance or a recent event. (3) No temporal decomposition of store 9999 performance was conducted; the uniform ~0.69 FTPR across all 52 weeks and 8 categories is itself consistent with synthetic-data generation.
 
 <details>
 <summary>Methodology & lineage</summary>
@@ -235,14 +235,14 @@ Four action cards generated for: (1) the operational event degrading 15 specific
 
 | Priority | Gap | What would close it |
 |---|---|---|
-| HIGH | No prior-year data — all trend and change-point findings are in-sample only; seasonal effects uncontrollable | Request prior fiscal year (Jul 2024 – Jun 2025) OGP data pull from Walmart Luminate for RCCB; join on DATE_SID and ORIGINAL_UPC |
-| HIGH | Triggering event for broken-cohort change-point unidentifiable from dataset | Add store metadata columns: district, region, DC_assignment, OGP_banner, last_operational_change_date to Walmart Luminate extract |
-| HIGH | Store 9999 identity unknown | Walmart Luminate store master lookup: confirm whether STORE_NBR=9999 is an active OGP location |
+| HIGH | No prior-year data — all trend and change-point findings are in-sample only; seasonal effects uncontrollable | Request prior fiscal year (Jul 2024 – Jun 2025) OPD data pull from Walmart Luminate for RCCB; join on DATE_SID and ORIGINAL_UPC |
+| HIGH | Triggering event for broken-cohort change-point unidentifiable from dataset | Add store metadata columns: district, region, DC_assignment, OPD_banner, last_operational_change_date to Walmart Luminate extract |
+| HIGH | Store 9999 identity unknown | Walmart Luminate store master lookup: confirm whether STORE_NBR=9999 is an active OPD location |
 | MEDIUM | FTPR_QTY and FTPR_NMRTR are identical on all rows — independent numerator validation blocked | Investigate source-table extract logic; confirm whether FTPR_QTY is correctly populated in Snowflake or is a known alias |
 | MEDIUM | KO/WM attribution flags perfectly mutually exclusive with 0 co-occurrences — may be synthetic generation artifact | Validate against production Snowflake table; confirm whether attribution ambiguity and co-occurrence is present in real data |
-| LOW | No daily granularity — mid-week OGP pick patterns unobservable | Request daily grain data from Walmart Luminate to detect within-week stock-out recovery patterns |
+| LOW | No daily granularity — mid-week OPD pick patterns unobservable | Request daily grain data from Walmart Luminate to detect within-week stock-out recovery patterns |
 
-**Source:** synthetic_walmart.csv (walmart_ogp_synthetic_v1) | run 2026-06-29
+**Source:** synthetic_walmart.csv (walmart_opd_synthetic_v1) | run 2026-06-29
 
 ---
 *Methodology: Weekly volume-weighted FTPR and nil-pick rate computed at UPC×Store×Week grain; resistant statistics (median, MAD) throughout per skewed distributions; BH-FDR correction at q=0.10 for all multi-comparison analyses; findings independently validated by Findings Validator (layer 1–4 review with recomputation). Dataset: 100,000 rows, 125 stores, 26 UPCs, 8 categories, 52 weeks (2025-07-07 to 2026-06-29). This dataset shows patterns consistent with synthetic data generation; all operational recommendations are conditional on production-data validation.*

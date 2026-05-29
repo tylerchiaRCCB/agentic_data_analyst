@@ -60,7 +60,10 @@ class CLIArgs:
     question: str | None
     scheduled: bool
     prompt_config: Path | None
-    data: Path
+    data: Path | None
+    source: str  # "file" or "cortex_analyst"
+    semantic_view: str | None
+    backend: str  # "anthropic" or "foundry"
     domain: str | None
     config_path: Path
     output_dir: Path
@@ -81,7 +84,20 @@ def parse_args() -> CLIArgs:
         type=Path,
         help="YAML file with scheduled-prompt configuration. Used with --scheduled.",
     )
-    p.add_argument("--data", type=Path, required=True, help="Path to CSV or Excel data file.")
+    p.add_argument("--data", type=Path, default=None, help="Path to CSV or Excel data file.")
+    p.add_argument(
+        "--source",
+        type=str,
+        choices=["file", "cortex_analyst"],
+        default="file",
+        help="Data source type. 'file' uses --data CSV/Excel. 'cortex_analyst' uses Snowflake Cortex Analyst.",
+    )
+    p.add_argument(
+        "--semantic-view",
+        type=str,
+        default=None,
+        help="Fully-qualified Snowflake semantic view (e.g. DB.SCHEMA.VIEW). Required when --source=cortex_analyst.",
+    )
     p.add_argument(
         "--domain",
         type=str,
@@ -113,18 +129,33 @@ def parse_args() -> CLIArgs:
         "assembles prompts for every agent, validates schemas, writes a dry-run report. "
         "No Anthropic API calls are made.",
     )
+    p.add_argument(
+        "--backend",
+        type=str,
+        choices=["anthropic", "foundry"],
+        default="anthropic",
+        help="LLM backend. 'anthropic' uses direct Anthropic API (chris-anderson-anthropic key). "
+        "'foundry' uses Azure AI Foundry (raghu-anthropic key, data stays in Azure).",
+    )
     a = p.parse_args()
 
     if not a.scheduled and not a.question:
         p.error("Either --question or --scheduled (with --prompt-config) must be provided.")
     if a.scheduled and not a.prompt_config:
         p.error("--scheduled requires --prompt-config.")
+    if a.source == "cortex_analyst" and not a.semantic_view:
+        p.error("--source=cortex_analyst requires --semantic-view.")
+    if a.source == "file" and not a.data:
+        p.error("--source=file requires --data.")
 
     return CLIArgs(
         question=a.question,
         scheduled=a.scheduled,
         prompt_config=a.prompt_config,
         data=a.data,
+        source=a.source,
+        semantic_view=a.semantic_view,
+        backend=getattr(a, 'backend', 'anthropic'),
         domain=a.domain,
         config_path=a.config,
         output_dir=a.output_dir,
@@ -141,8 +172,38 @@ def load_config(path: Path) -> dict[str, Any]:
 def main() -> int:
     args = parse_args()
 
-    if not args.dry_run and not os.getenv("ANTHROPIC_API_KEY"):
-        logger.error("ANTHROPIC_API_KEY environment variable is required (unless --dry-run).")
+    # ---- Azure Key Vault: load LLM API key ----
+    _FOUNDRY_BASE_URL = "https://rk-sb-project-0-1-resource.services.ai.azure.com/anthropic"
+    _VAULT_URL = "https://glccbdsdevkv.vault.azure.net/"
+    _KEY_NAMES = {
+        "anthropic": "chris-anderson-anthropic",
+        "foundry": "raghu-anthropic",
+    }
+
+    llm_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
+    if not args.dry_run and not llm_api_key:
+        try:
+            from azure.identity import AzureCliCredential, DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+
+            secret_name = _KEY_NAMES[args.backend]
+            try:
+                credential = DefaultAzureCredential()
+                kv_client = SecretClient(vault_url=_VAULT_URL, credential=credential)
+                secret = kv_client.get_secret(secret_name)
+                cred_name = "DefaultAzureCredential"
+            except Exception:
+                credential = AzureCliCredential()
+                kv_client = SecretClient(vault_url=_VAULT_URL, credential=credential)
+                secret = kv_client.get_secret(secret_name)
+                cred_name = "AzureCliCredential"
+            llm_api_key = secret.value
+            logger.info(f"Loaded {secret_name} from Azure Key Vault ({cred_name}) for backend={args.backend}")
+        except Exception as e:
+            logger.error(f"Failed to load API key from Azure Key Vault: {e}")
+
+    if not args.dry_run and not llm_api_key:
+        logger.error("API key is required (unless --dry-run). Check Key Vault or set ANTHROPIC_API_KEY.")
         return 2
 
     if args.dry_run:
@@ -160,11 +221,61 @@ def main() -> int:
     tracer = Tracer(run_id=run_id)
     lineage = LineageTracker(run_id=run_id)
 
-    run_logger.info("Pipeline run starting", run_id=run_id, data=str(args.data), domain=args.domain or "(none)")
+    run_logger.info("Pipeline run starting", run_id=run_id, data=str(args.data or args.semantic_view), domain=args.domain or "(none)")
+
+    # ---- Acquire data: file-based or Cortex Analyst ----
+    if args.source == "cortex_analyst":
+        # NL-to-SQL via Snowflake Cortex Analyst → DataFrame → temp CSV for pipeline
+        from src.data_access.cortex_analyst_client import CortexAnalystClient
+        from src.data_access.snowflake_client import SnowflakeClient, SnowflakeConfig
+        import tempfile
+
+        with tracer.span("data_access.cortex_analyst"):
+            sf_config = SnowflakeConfig.from_team_keyvault()
+            sf_client = SnowflakeClient(sf_config)
+            cortex = CortexAnalystClient(snowflake=sf_client)
+
+            # Derive semantic_model name from domain (e.g. "walmart-opd")
+            semantic_model_name = args.domain or "default"
+            response = cortex.ask(
+                question=args.question or "",
+                semantic_model=semantic_model_name,
+                semantic_view=args.semantic_view,
+            )
+            lineage.add_statistic(
+                agent="cortex-analyst",
+                stage_index=0,
+                statistic={
+                    "action": "nl_to_sql",
+                    "generated_sql": response.generated_sql,
+                    "request_id": response.request_id,
+                    "rows_returned": response.rows_returned,
+                    "warnings": response.warnings,
+                    "semantic_view": args.semantic_view,
+                },
+            )
+            run_logger.info(
+                "Cortex Analyst returned data",
+                rows=response.rows_returned,
+                columns=len(response.dataframe.columns) if not response.dataframe.empty else 0,
+                sql_chars=len(response.generated_sql),
+                request_id=response.request_id,
+            )
+
+        if response.dataframe.empty:
+            run_logger.error("Cortex Analyst returned no data. Cannot proceed.")
+            return 3
+
+        # Write to temp CSV so the rest of the pipeline (upload, profiling) works unchanged
+        tmp_csv = Path(tempfile.mktemp(suffix=".csv", prefix="cortex_"))
+        response.dataframe.to_csv(tmp_csv, index=False)
+        data_path = tmp_csv
+    else:
+        data_path = args.data
 
     # ---- Load data locally for profiling metadata (orchestrator-side summary) ----
     with tracer.span("data_access.load_tabular"):
-        dataset = load_tabular(args.data, row_threshold=cfg.get("row_threshold", 5_000_000))
+        dataset = load_tabular(data_path, row_threshold=cfg.get("row_threshold", 5_000_000))
 
     data_summary = {
         "source_path": str(dataset.source_path),
@@ -185,7 +296,11 @@ def main() -> int:
         sampled=dataset.was_sampled,
     )
 
-    client = ClaudeClient()
+    client = ClaudeClient(
+        api_key=llm_api_key,
+        backend=args.backend,
+        base_url=_FOUNDRY_BASE_URL if args.backend == "foundry" else None,
+    )
     budget = BudgetTracker(
         budget_tokens=cfg.get("budget_tokens_default", 1_200_000),
         cost_per_million=cfg.get("cost_per_million", {}),
@@ -198,7 +313,7 @@ def main() -> int:
     if not args.no_upload:
         with tracer.span("data_access.upload_to_anthropic"):
             try:
-                dataset_file_id = client.upload_file(args.data)
+                dataset_file_id = client.upload_file(data_path)
                 run_logger.info("Dataset uploaded to Anthropic Files API", file_id=dataset_file_id)
             except Exception as e:
                 run_logger.warning(
@@ -367,7 +482,31 @@ def _dry_run(args: CLIArgs) -> int:
     print("\n[1/5] Loading data...")
     try:
         cfg = load_config(args.config_path)
-        dataset = load_tabular(args.data, row_threshold=cfg.get("row_threshold", 5_000_000))
+        if args.source == "cortex_analyst":
+            import tempfile
+            from src.data_access.cortex_analyst_client import CortexAnalystClient
+            from src.data_access.snowflake_client import SnowflakeClient, SnowflakeConfig
+
+            sf_config = SnowflakeConfig.from_team_keyvault()
+            sf_client = SnowflakeClient(sf_config)
+            cortex = CortexAnalystClient(snowflake=sf_client)
+            semantic_model_name = args.domain or "default"
+            response = cortex.ask(
+                question=args.question or "",
+                semantic_model=semantic_model_name,
+                semantic_view=args.semantic_view,
+            )
+            print(f"  Cortex Analyst SQL ({response.rows_returned} rows):")
+            print(f"    {response.generated_sql[:200]}...")
+            if response.dataframe.empty:
+                print("  FAIL: Cortex Analyst returned no data.")
+                return 1
+            tmp_csv = Path(tempfile.mktemp(suffix=".csv", prefix="cortex_"))
+            response.dataframe.to_csv(tmp_csv, index=False)
+            data_path = tmp_csv
+        else:
+            data_path = args.data
+        dataset = load_tabular(data_path, row_threshold=cfg.get("row_threshold", 5_000_000))
     except Exception as e:
         print(f"  FAIL: {type(e).__name__}: {e}")
         return 1
