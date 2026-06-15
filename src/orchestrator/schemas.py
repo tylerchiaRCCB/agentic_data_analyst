@@ -1136,6 +1136,7 @@ class Artifact(StrictModel):
 # correctly shaped when Pydantic sees it.
 _KNOWN_ENVELOPE_KEYS: frozenset[str] = frozenset({
     "$PARAMETER_VALUE",
+    "$PARAMETER_NAME",
     "input",         # tool_use's own param name; sometimes echoed back
     "parameters",
     "arguments",     # OpenAI-style function-calling convention; occasionally leaks

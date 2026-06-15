@@ -1,10 +1,22 @@
-# Walmart OPD — Nil-Pick & First Time Pick Rate (FTPR)
+# Walmart OPD — In-Stock Performance × RCCB Internal Data
 
 ## Data Source
-Walmart Luminate / Retail Link — Online, Pickup, and Delivery (OPD) order fulfillment data for RCCB (Reyes Coca-Cola Bottling) products.
+Walmart Luminate / Retail Link — Online, Pickup, and Delivery (OPD) order fulfillment data for RCCB (Reyes Coca-Cola Bottling) products, enriched with RCCB internal product, customer, distribution center, delivery, merchandising, and calendar data.
 
-## Grain
-One row = one **UPC × Store × Date**. `DATE_SID` is an integer date key in `YYYYMMDD` format.
+## Tables & Grain
+
+### Primary Fact: OPD Daily (`WALMART_STANDARDIZED_EXTERNAL_DATA`)
+One row = one **UPC × Store × Date**. `DATE_SID` is a VARCHAR date key in `YYYYMMDD` format.
+
+### Related Tables (joined via bridge views)
+
+| Table | Source | Join Path | Purpose |
+|---|---|---|---|
+| `V_STORE_CUSTOMER` | `CCB_DATASCIENCE_DEV.WALMART_OPD` | `STORE_NBR → STORE_NBR` | Maps Walmart store numbers to RCCB customers, distribution centers, and territory hierarchy |
+| `V_UPC_PRODUCT` | `CCB_DATASCIENCE_DEV.WALMART_OPD` | `CORE_UPC_10 → CORE_UPC_10` | Maps Walmart UPCs to RCCB product IDs, descriptions, and Promoted Package Groups (PPG) |
+| `F_DELIVERY_STOP_DTL_V` | `CCB_PRD.DM` | via `CUSTOMER_SID` and/or `PRODUCT_SID` from bridges | RCCB delivery execution — cases delivered, delivery frequency |
+| `F_STOP` | `CCB_PRD.GREEN_MILE_CORE` | via `CUSTOMER_SID` from store bridge | GreenMile merchandising and delivery stop events — visit count, duration |
+| `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` | `CCB_PRD.DM` | `DATE_SID → DATE_SID` | Coke fiscal calendar — fiscal year/period/week, holidays, day of week |
 
 ## Key Metrics
 
@@ -33,9 +45,29 @@ One row = one **UPC × Store × Date**. `DATE_SID` is an integer date key in `YY
 | `UNIQUE_KEY` | Surrogate/hash key uniquely identifying each row |
 | `DATE_SID` | Date key in YYYYMMDD format |
 | `STORE_NBR` | Walmart store number |
-| `CATEGORY` | Product category (e.g., SH Coconut Water, SSD, etc.) |
+| `BRAND` | Product brand (Coca-Cola, Monster, Dasani, Powerade, Gold Peak, Topo Chico, smartwater) |
+| `CATEGORY` | Product category (SSD, ENERGY, Water, Isotonics, Tea, RTD Coffee, Enh Water, etc.) |
+| `FLAVOR` | Product flavor variant |
+| `ORIGINAL_ITEM_DESC` | Full product description from Walmart |
 | `SIZE` | Package size (e.g., "16 OZ SINGLE", "12oz 8pk PET") |
 | `ORIGINAL_UPC` | Product UPC identifier |
+| `UPC_NO_LEADING_ZEROS` | UPC with leading zeros stripped |
+| `CORE_UPC_10` | 10-digit core UPC — **join key** to RCCB product master via `V_UPC_PRODUCT` |
+
+## Cross-Table Dimensions (via bridge views)
+
+| Column | Bridge View | Meaning |
+|---|---|---|
+| `DISTRIBUTION_CENTER_DESC` | `V_STORE_CUSTOMER` | RCCB distribution center name serving the Walmart store |
+| `CUSTOMER_SID` | `V_STORE_CUSTOMER` | RCCB customer surrogate key — join to delivery and merch tables |
+| `CUSTOMER_ID` | `V_STORE_CUSTOMER` | RCCB customer natural key |
+| `PRODUCT_ID` | `V_UPC_PRODUCT` | RCCB product (material) ID — 6-digit identifier |
+| `PRODUCT_SID` | `V_UPC_PRODUCT` | RCCB product surrogate key — join to delivery tables |
+| `PRODUCT_DESC` | `V_UPC_PRODUCT` | RCCB product description |
+| `PROMOTED_PACKAGE_GROUP_DESC` | `V_UPC_PRODUCT` | PPG — groups products for trade promotion planning |
+| `FISCAL_YEAR` / `FISCAL_PERIOD_NUM` / `FISCAL_WEEK_NUM` | `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` | Coke fiscal calendar fields |
+| `HOLIDAY_IND` / `HOLIDAY_DESC` | `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` | Holiday indicator and name |
+| `DAY_OF_WEEK_DESC` | `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` | Day of week name |
 
 ## Business Context
 - **FTPR** (First Time Pick Rate) is the primary OPD service metric. Higher is better. Target is typically ≥ 95%.
@@ -46,14 +78,29 @@ One row = one **UPC × Store × Date**. `DATE_SID` is an integer date key in `YY
 - **Scheduled vs unscheduled nil-picks** distinguish between picks that fail during the planned window vs outside it.
 - RCCB is a Coca-Cola bottler serving convenience and grocery retail; Walmart is a key account.
 
+## Relationship Hypotheses
+When analyzing in-stock drivers, consider these cross-table relationships:
+- **DC Performance**: Join OPD → `V_STORE_CUSTOMER` to group FTPR/nil-pick rates by distribution center. Identify which DCs have the worst in-stock metrics and whether KO attribution is concentrated.
+- **Delivery Execution**: Join OPD → `V_STORE_CUSTOMER` → `F_DELIVERY_STOP_DTL_V` to correlate delivery volume and frequency with FTPR. Stores receiving more frequent deliveries may have better shelf availability.
+- **Merch Execution**: Join OPD → `V_STORE_CUSTOMER` → `F_STOP` to test whether stores with more merchandising visits or longer merch time have better FTPR. Filter `ROLE LIKE '%MERCH%'` for merch stops, `ROLE = 'DC'` for delivery stops.
+- **Product-Level Supply**: Join OPD → `V_UPC_PRODUCT` → `F_DELIVERY_STOP_DTL_V` to analyze delivery volume at the product level. Products with low delivery frequency relative to pick demand may have higher nil-pick rates.
+- **Calendar Effects**: Join OPD → `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` to check for holiday impacts, day-of-week patterns, and fiscal period trends on in-stock performance.
+- **Trade Promotions**: PPG from `V_UPC_PRODUCT` can link to `CCB_PRD.ANAPLAN_RAW_SHARE.TPO_V` to check if promo weeks show worse FTPR (demand spike not met by supply).
+
 ## Guardrail Pairings
 - When FTPR declines, check whether nil-picks rose (they should be inversely correlated).
 - When nil-picks rise, check KO vs WM attribution flags to determine accountability.
 - Substitution rates can mask nil-pick severity — a high pre-sub rate may hide true out-of-stock impact.
+- When a DC shows poor FTPR, check both its KO attribution rate (supply-side) and delivery volume (is it underserving?).
+- When merch visits are low for a store, check if nil-pick rates are disproportionately high — merch gaps may cause phantom inventory.
 
 ## Known Considerations
-- `DATE_SID` is integer format `YYYYMMDD`, not a standard date — parse accordingly.
-- Product descriptor columns (BRAND, CATEGORY, FLAVOR, ITEM_DESC, SIZE) are available in the full Snowflake table but excluded from the synthetic sample to avoid inconsistent UPC-to-attribute mappings.
+- `DATE_SID` is VARCHAR format `YYYYMMDD`, not a standard date — use `TRY_TO_DATE(DATE_SID, 'YYYYMMDD')` for date arithmetic.
+- `STORE_NBR = 9999` is a sentinel/rollup code — always exclude with `STORE_NBR != 9999`.
+- Always compute rates as `SUM(numerator) / NULLIF(SUM(denominator), 0)`. Never use `AVG` of pre-computed row-level rates — that introduces Simpson's Paradox.
+- The store-to-customer mapping uses `REGEXP_SUBSTR(CUSTOMER_DESC, '#([0-9]+)')` — pharmacies are excluded from the bridge view to avoid duplicate store numbers.
+- The UPC-to-product bridge filters to `MATERIAL_TYPE = 'ZFER'` (finished goods), `PRODUCT_ID > 99999`, and `PPG IS NOT NULL` to keep only active SKUs.
+- GreenMile `ACTUAL_ARRIVAL_DATE` and `ACTUAL_DEPARTURE_DATE` are native TIMESTAMP columns — use directly with `DATEDIFF()`. Filter by `ROUTE_DATE` for date ranges.
 
 ## Column Reference (Snowflake Schema)
 

@@ -55,6 +55,7 @@ from src.orchestrator.schemas import (
     QuestionFramerPayload,
     TokenUsage,
     validate_payload,
+    _unwrap_envelope,
 )
 
 logger = logging.getLogger(__name__)
@@ -533,6 +534,10 @@ class PipelineExecutor:
                 last_error = f"Schema validation failed: {e.errors()[:3]}"
                 clarification = {"type": "text", "text": self._clarification_for(agent, last_error)}
                 continue
+
+            # Store the unwrapped payload — _unwrap_envelope returns the clean
+            # dict without the wrapper key, but doesn't mutate the original.
+            parsed = _unwrap_envelope(parsed)
 
             artifact = {
                 "schema_version": "1.0",

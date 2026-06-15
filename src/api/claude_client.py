@@ -111,6 +111,11 @@ class ClaudeClient:
             logger.info("ClaudeClient using direct Anthropic backend")
         self._max_retries = max_retries
         self._backend = backend
+        # Azure AI Foundry deployments may not have all models. Map unavailable
+        # models to the deployed one. Update this dict as new deployments are added.
+        self._foundry_model_map: dict[str, str] = {
+            "claude-sonnet-4-6": "claude-opus-4-7",
+        }
 
     # ---------- Files API: upload dataset once per run ----------
 
@@ -178,6 +183,12 @@ class ClaudeClient:
             betas.append(BETA_CODE_EXECUTION)
         if enable_files_api:
             betas.append(BETA_FILES_API)
+
+        # Remap model for Foundry if the requested deployment doesn't exist.
+        if self._backend == "foundry" and model in self._foundry_model_map:
+            original_model = model
+            model = self._foundry_model_map[model]
+            logger.info("Foundry model remap: %s → %s", original_model, model)
 
         attempt = 0
         delay = 2.0

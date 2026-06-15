@@ -132,10 +132,12 @@ def parse_args() -> CLIArgs:
     p.add_argument(
         "--backend",
         type=str,
-        choices=["anthropic", "foundry"],
+        choices=["anthropic", "foundry", "foundry-dev", "azure-openai"],
         default="anthropic",
         help="LLM backend. 'anthropic' uses direct Anthropic API (chris-anderson-anthropic key). "
-        "'foundry' uses Azure AI Foundry (raghu-anthropic key, data stays in Azure).",
+        "'foundry' uses Azure AI Foundry Anthropic models (raghu-anthropic key, data stays in Azure). "
+        "'foundry-dev' uses Azure AI Foundry dev environment (raghu-anthropic-dev key). "
+        "'azure-openai' uses Azure OpenAI (raghu-openai key, GPT models via LiteLLM).",
     )
     a = p.parse_args()
 
@@ -143,8 +145,8 @@ def parse_args() -> CLIArgs:
         p.error("Either --question or --scheduled (with --prompt-config) must be provided.")
     if a.scheduled and not a.prompt_config:
         p.error("--scheduled requires --prompt-config.")
-    if a.source == "cortex_analyst" and not a.semantic_view:
-        p.error("--source=cortex_analyst requires --semantic-view.")
+    if a.source == "cortex_analyst" and not a.semantic_view and not a.domain:
+        p.error("--source=cortex_analyst requires --semantic-view or --domain.")
     if a.source == "file" and not a.data:
         p.error("--source=file requires --data.")
 
@@ -174,10 +176,21 @@ def main() -> int:
 
     # ---- Azure Key Vault: load LLM API key ----
     _FOUNDRY_BASE_URL = "https://rk-sb-project-0-1-resource.services.ai.azure.com/anthropic"
+    _FOUNDRY_DEV_BASE_URL = "https://raghu-mpzq4rc5-eastus2.services.ai.azure.com/anthropic"
+    _AZURE_OPENAI_BASE_URL = "https://rk-sb-project-0-1-resource.openai.azure.com"
+    _AZURE_OPENAI_API_VERSION = "2025-04-01-preview"
+    # Map Claude model names → Azure OpenAI deployment names.
+    # Update deployment values if your resource uses different names.
+    _AZURE_OPENAI_MODEL_MAP: dict[str, str] = {
+        "claude-sonnet-4-6": "azure/gpt-4.1",
+        "claude-opus-4-7": "azure/gpt-4.1",
+    }
     _VAULT_URL = "https://glccbdsdevkv.vault.azure.net/"
     _KEY_NAMES = {
         "anthropic": "chris-anderson-anthropic",
         "foundry": "raghu-anthropic",
+        "foundry-dev": "raghu-anthropic-dev",
+        "azure-openai": "raghu-openai",
     }
 
     llm_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
@@ -210,6 +223,19 @@ def main() -> int:
         return _dry_run(args)
 
     cfg = load_config(args.config_path)
+
+    # For azure-openai, remap model names and set LiteLLM env vars.
+    if args.backend == "azure-openai":
+        os.environ["AZURE_API_KEY"] = llm_api_key
+        os.environ["AZURE_API_BASE"] = _AZURE_OPENAI_BASE_URL
+        os.environ["AZURE_API_VERSION"] = _AZURE_OPENAI_API_VERSION
+        model_map = cfg["model_per_agent"]
+        for agent_name in model_map:
+            original = model_map[agent_name]
+            if original in _AZURE_OPENAI_MODEL_MAP:
+                model_map[agent_name] = _AZURE_OPENAI_MODEL_MAP[original]
+                logger.info("Azure OpenAI model remap: %s → %s (agent: %s)", original, model_map[agent_name], agent_name)
+
     pipeline_cfg = PipelineConfig(
         model_per_agent=cfg["model_per_agent"],
         max_tokens_per_call=cfg.get("max_tokens_per_call", 8192),
@@ -296,11 +322,20 @@ def main() -> int:
         sampled=dataset.was_sampled,
     )
 
-    client = ClaudeClient(
-        api_key=llm_api_key,
-        backend=args.backend,
-        base_url=_FOUNDRY_BASE_URL if args.backend == "foundry" else None,
-    )
+    if args.backend == "azure-openai":
+        from src.api.litellm_client import LiteLLMClient
+        client = LiteLLMClient(api_key=llm_api_key)  # type: ignore[assignment]
+        logger.info("Using Azure OpenAI backend via LiteLLM: %s", _AZURE_OPENAI_BASE_URL)
+    else:
+        _foundry_urls = {
+            "foundry": _FOUNDRY_BASE_URL,
+            "foundry-dev": _FOUNDRY_DEV_BASE_URL,
+        }
+        client = ClaudeClient(
+            api_key=llm_api_key,
+            backend=args.backend if args.backend != "foundry-dev" else "foundry",
+            base_url=_foundry_urls.get(args.backend),
+        )
     budget = BudgetTracker(
         budget_tokens=cfg.get("budget_tokens_default", 1_200_000),
         cost_per_million=cfg.get("cost_per_million", {}),
@@ -369,6 +404,19 @@ def main() -> int:
 
         payload = comms_artifact["payload"]
         rendered = payload.get("rendered_output_markdown", "")
+
+        # Prepend run metadata (date, question, run ID) to the output
+        from datetime import datetime, timezone
+        run_date = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        question_text = args.question or proactive_prompt or "(scheduled)"
+        metadata_header = (
+            f"> **Run date:** {run_date}  \n"
+            f"> **Question:** {question_text}  \n"
+            f"> **Run ID:** `{run_id}` | **Backend:** `{args.backend}` | "
+            f"**Domain:** `{args.domain or '(none)'}`\n\n"
+        )
+        rendered = metadata_header + rendered
+
         decision = hitl_evaluate(
             run_id=run_id,
             output_dir=args.output_dir,

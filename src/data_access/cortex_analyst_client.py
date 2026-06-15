@@ -70,6 +70,85 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEMANTIC_MODELS_DIR = REPO_ROOT / "context" / "semantic_models"
 
+# ---------------------------------------------------------------------------
+# Question reframing — Cortex is the DATA layer, not the ANALYTICS layer
+# ---------------------------------------------------------------------------
+# When the pipeline sends an analytical question ("What factors drive FTPR?"),
+# Cortex tries to answer it directly by pre-aggregating.  We need granular
+# rows (e.g. store × week) so downstream agents can run correlations, change-
+# point detection, etc.  These constants + helpers reframe analytical questions
+# into data-retrieval requests that preserve grain.
+
+# Keywords whose presence signals an analytical (not lookup) question.
+_ANALYTICAL_SIGNALS = frozenset({
+    "correlat", "relationship", "factor", "driv", "cause", "impact",
+    "predict", "explain", "compar", "trend", "pattern", "anomal",
+    "regress", "cluster", "segment", "outlier", "decompos", "forecast",
+    "associat", "affect", "influenc", "contribut", "depend", "vary",
+    "scatter", "distribut", "effect", "differ", "worst", "best",
+})
+
+# Keywords whose presence signals daily (not weekly) grain is needed.
+_DAILY_GRAIN_SIGNALS = frozenset({
+    "daily", "day-of-week", "day of week", "dayofweek", "intra-week",
+    "intraweek", "per day", "each day", "by day", "weekday", "weekend",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday",
+})
+
+# Minimum row count below which we consider the result over-aggregated for
+# an analytical question.  42 DC-level rows can't support correlation analysis.
+_MIN_ANALYTICAL_ROWS = 200
+
+
+def _is_analytical(question: str) -> bool:
+    """Return True if the question is analytical rather than a simple lookup."""
+    q = question.lower()
+    return any(signal in q for signal in _ANALYTICAL_SIGNALS)
+
+
+def _detect_grain(question: str) -> tuple[str, str]:
+    """Detect whether the question needs daily or weekly grain.
+
+    Returns (grain_hint, grain_description) tuple.
+    """
+    q = question.lower()
+    if any(signal in q for signal in _DAILY_GRAIN_SIGNALS):
+        return "STORE_NBR × DATE_SID (daily)", "one row per store per day"
+    return "STORE_NBR × WEEK (weekly)", "one row per store per week"
+
+
+def _reframe_for_retrieval(question: str, semantic_model_name: str) -> str:
+    """Wrap an analytical question with grain-preservation instructions.
+
+    The reframed question tells Cortex to act as a data-retrieval layer:
+    return granular rows with raw numerators/denominators so that downstream
+    statistical agents can do the actual analysis.
+
+    Auto-detects daily vs weekly grain based on question keywords.
+    """
+    grain_hint, grain_desc = _detect_grain(question)
+
+    return (
+        f"DATA RETRIEVAL REQUEST — return granular data, do NOT pre-aggregate.\n\n"
+        f"The downstream analytical system needs raw, row-level data to perform "
+        f"its own statistical analysis (correlations, regressions, trend detection). "
+        f"Your job is to retrieve the data, not to compute final statistics.\n\n"
+        f"RULES:\n"
+        f"- Return data at {grain_hint} grain ({grain_desc}).\n"
+        f"- Include raw numerators and denominators (e.g. FTPR_NMRTR, FTPR_DNMNTR) "
+        f"as separate columns — do NOT compute only the final rate.\n"
+        f"- Include all dimension columns relevant to the question "
+        f"(distribution center, brand, category, etc.).\n"
+        f"- Do NOT GROUP BY to a coarser grain than {grain_hint}.\n"
+        f"- Do NOT compute correlations, averages, or summary statistics.\n"
+        f"- Do NOT use LIMIT unless the result would exceed 500,000 rows.\n"
+        f"- Apply date filters (e.g. DATE_SID >= '20250101') and exclude "
+        f"sentinel values.\n\n"
+        f"QUESTION CONTEXT (what the analyst wants to explore — retrieve the "
+        f"data they need, do not answer it):\n{question}"
+    )
+
 
 @dataclass
 class CortexAnalystResponse:
@@ -142,6 +221,16 @@ class CortexAnalystClient:
         if self.mock_mode:
             return self._mock_response(question, semantic_model, limit)
 
+        # ---- Reframe analytical questions for data retrieval ----
+        analytical = _is_analytical(question)
+        effective_question = (
+            _reframe_for_retrieval(question, semantic_model) if analytical else question
+        )
+        if analytical:
+            logger.info(
+                "Analytical question detected — reframed for granular data retrieval"
+            )
+
         # ---- Real-mode: call Cortex Analyst REST API ----
         import requests
 
@@ -160,7 +249,7 @@ class CortexAnalystClient:
                 "messages": [
                     {
                         "role": "user",
-                        "content": [{"type": "text", "text": question}],
+                        "content": [{"type": "text", "text": effective_question}],
                     }
                 ],
                 "semantic_view": semantic_view,
@@ -180,7 +269,7 @@ class CortexAnalystClient:
                 "messages": [
                     {
                         "role": "user",
-                        "content": [{"type": "text", "text": question}],
+                        "content": [{"type": "text", "text": effective_question}],
                     }
                 ],
                 "semantic_model": semantic_model_yaml,
@@ -264,6 +353,23 @@ class CortexAnalystClient:
             "Cortex Analyst returned %d rows, %d columns",
             len(df), len(df.columns),
         )
+
+        # ---- Grain validation for analytical questions ----
+        if analytical and len(df) < _MIN_ANALYTICAL_ROWS and len(df) > 0:
+            logger.warning(
+                "Cortex returned only %d rows for an analytical question "
+                "(expected >= %d for statistical analysis). Data may be "
+                "over-aggregated. Consider using a verified query or "
+                "narrowing the question.",
+                len(df), _MIN_ANALYTICAL_ROWS,
+            )
+            warnings.append(
+                f"Over-aggregation detected: Cortex returned {len(df)} rows for "
+                f"an analytical question. Downstream statistical analysis "
+                f"(correlations, regressions) may be unreliable with this few "
+                f"observations. Expected >= {_MIN_ANALYTICAL_ROWS} rows at "
+                f"store × week grain."
+            )
 
         return CortexAnalystResponse(
             generated_sql=generated_sql,
