@@ -5,6 +5,16 @@
 
 If this skill is invoked, the run did its job. The data was examined, baselines were checked, and the analysis concluded — honestly — that nothing required attention. The descriptive summary documents that work so the recipient understands what was looked at, what would have constituted a finding, and that none was found.
 
+**BREVITY RULES:**
+- The entire Weekly Summary section (excluding `<details>` blocks) must be **under 600 words**.
+- "What's stable" = **3-6 one-line bullets**. Each bullet is ONE line — metric, value, direction.
+- "Structural observations" = **maximum 3 bullets, each 2 sentences max**. No paragraph-length observations.
+- "What would have constituted a finding" = **maximum 3 bullets**. Only the most decision-relevant thresholds.
+- "Conclusion" = **1-2 sentences**. State the all-clear.
+- Open data gaps table = **maximum 4 rows**. Only HIGH and MEDIUM priority.
+- All methodology and statistical detail goes in `<details>` blocks — never in the body.
+- **COMPRESS, DON'T DISCARD:** Any additional stable metrics, structural observations, thresholds checked, or data gaps beyond these limits go into the summary's `<details>` audit trail block. The body is the executive layer; `<details>` is the complete analyst record.
+
 ## Why this output exists
 
 The strongest demonstration of the system's discipline is its ability to remain quiet when staying quiet is the right answer. A tool that fabricates findings to fill space erodes recipient trust on every run; a tool that produces a brief, useful descriptive summary on quiet weeks earns trust on every run.

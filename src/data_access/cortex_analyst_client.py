@@ -129,22 +129,46 @@ def _reframe_for_retrieval(question: str, semantic_model_name: str) -> str:
     """
     grain_hint, grain_desc = _detect_grain(question)
 
+    # The raw OPD table is at UPC × Store × Date grain (millions of rows).
+    # Both daily and weekly modes MUST aggregate across UPCs using GROUP BY
+    # and SUM. Without this, Cortex returns the raw fact table.
+    if "daily" in grain_hint.lower():
+        group_by_clause = "GROUP BY STORE_NBR, DATE_SID"
+        agg_example = (
+            "SELECT STORE_NBR, DATE_SID, "
+            "SUM(FTPR_NMRTR) AS ftpr_nmrtr, SUM(FTPR_DNMNTR) AS ftpr_dnmntr, "
+            "SUM(NIL_PICK_QTY) AS nil_pick_qty ... "
+            "FROM table "
+            "GROUP BY STORE_NBR, DATE_SID"
+        )
+    else:
+        group_by_clause = (
+            "GROUP BY STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD'))"
+        )
+        agg_example = (
+            "SELECT STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start, "
+            "SUM(FTPR_NMRTR) AS ftpr_nmrtr, SUM(FTPR_DNMNTR) AS ftpr_dnmntr, "
+            "SUM(NIL_PICK_QTY) AS nil_pick_qty ... "
+            "FROM table "
+            "GROUP BY STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD'))"
+        )
+
     return (
-        f"DATA RETRIEVAL REQUEST — return granular data, do NOT pre-aggregate.\n\n"
-        f"The downstream analytical system needs raw, row-level data to perform "
-        f"its own statistical analysis (correlations, regressions, trend detection). "
-        f"Your job is to retrieve the data, not to compute final statistics.\n\n"
+        f"DATA RETRIEVAL REQUEST — you MUST aggregate with GROUP BY, not return raw rows.\n\n"
+        f"CRITICAL: The source table has one row per UPC × Store × Date. "
+        f"You MUST use {group_by_clause} and SUM() all metric columns "
+        f"to aggregate across UPCs. Do NOT select individual UPC rows. "
+        f"The result should have {grain_desc}, NOT one row per UPC per store per day.\n\n"
+        f"REQUIRED SQL PATTERN:\n{agg_example}\n\n"
         f"RULES:\n"
         f"- Return data at {grain_hint} grain ({grain_desc}).\n"
-        f"- Include raw numerators and denominators (e.g. FTPR_NMRTR, FTPR_DNMNTR) "
-        f"as separate columns — do NOT compute only the final rate.\n"
-        f"- Include all dimension columns relevant to the question "
-        f"(distribution center, brand, category, etc.).\n"
-        f"- Do NOT GROUP BY to a coarser grain than {grain_hint}.\n"
+        f"- Use SUM() for all numeric measure columns: FTPR_NMRTR, FTPR_DNMNTR, "
+        f"NIL_PICK_QTY, SCHDL_NIL_PICK_RATE_NMRTR, SCHDL_NIL_PICK_RATE_DNMNTR, etc.\n"
+        f"- Include dimension columns in GROUP BY: STORE_NBR, and optionally "
+        f"distribution center, category, brand as needed for the question.\n"
+        f"- Do NOT return raw UPC-level rows — the result must be under 100,000 rows.\n"
         f"- Do NOT compute correlations, averages, or summary statistics.\n"
-        f"- Do NOT use LIMIT unless the result would exceed 500,000 rows.\n"
-        f"- Apply date filters (e.g. DATE_SID >= '20250101') and exclude "
-        f"sentinel values.\n\n"
+        f"- Apply date filters and exclude sentinel values (STORE_NBR != 9999).\n\n"
         f"QUESTION CONTEXT (what the analyst wants to explore — retrieve the "
         f"data they need, do not answer it):\n{question}"
     )

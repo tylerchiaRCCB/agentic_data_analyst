@@ -7,6 +7,15 @@ A good action card is **specific, owned, time-bounded, and counter-metric-aware.
 
 The card must be **executive-readable** — not analyst-readable. Senior leaders don't read statistical notation; they read business consequence. Statistical methodology belongs in a methodology footer or a `<details>` block, never in the headline or body.
 
+**BREVITY RULES:**
+- Each card body (alert through caveats, excluding `<details>`) must be **under 400 words**.
+- "Why this matters" = **2-3 sentences max**. One quantified business consequence.
+- "Root cause" = **2-3 sentences max**. State what's known, what's not.
+- "Recommended action" = **2-3 sentences max**. Specific and executable.
+- Caveats = **maximum 3 bullets**. Consolidate related caveats into one.
+- If you can't say it in 3 sentences, the finding needs tightening, not more words.
+- **COMPRESS, DON'T DISCARD:** Any caveats, supporting evidence, secondary analysis, or extended context beyond these limits goes into the card's `<details>` Methodology block. Nothing is lost — it moves from the executive layer to the analyst layer.
+
 ## Card structure — rendered markdown, NOT a code-fenced block
 
 Each action card is rendered as native markdown (headers, bold, tables, callouts) so that:

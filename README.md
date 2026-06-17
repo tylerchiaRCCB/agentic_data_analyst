@@ -12,6 +12,49 @@ Every design decision — every agent, every skill, every prompt — must reinfo
 
 ## How it works (high level)
 
+```mermaid
+flowchart LR
+    subgraph "Git Workflow"
+        MAIN["main branch<br/><i>production/stable</i>"]
+        DEV["dev branch<br/><i>continuous enhancements</i>"]
+        DEV -->|"PR / merge"| MAIN
+    end
+
+    subgraph "Pipeline Execution"
+        Q["User Question<br/><i>CLI or scheduled</i>"]
+        REFRAME["Question Reframer<br/><i>Detects analytical vs lookup,<br/>sets grain (daily/weekly)</i>"]
+        CORTEX["Snowflake Cortex Analyst<br/><i>NL → SQL → Data</i>"]
+        YAML["Semantic Model (YAML)<br/><i>Tables, relationships,<br/>verified queries</i>"]
+        DATA["Store × Week/Day Data"]
+    end
+
+    subgraph "Azure AI Foundry (Claude API)"
+        FRAMER["Question Framer<br/><i>Determines complexity,<br/>composes pipeline</i>"]
+        AGENTS["Analytical Agents<br/><i>Profiler → Analyzer →<br/>Pattern → Root Cause</i>"]
+        VALIDATOR["Findings Validator<br/><i>Independent recomputation,<br/>confidence grading</i>"]
+        COMMS["Communication Agent<br/><i>Executive Summary +<br/>Action Cards</i>"]
+    end
+
+    subgraph "Output"
+        MD["Markdown Report<br/><i>Executive layer + <br/>analyst details</i>"]
+        ARTIFACTS["Run Artifacts<br/><i>JSON per stage,<br/>lineage, spans</i>"]
+    end
+
+    Q --> REFRAME
+    REFRAME --> CORTEX
+    YAML -.->|"inline YAML"| CORTEX
+    CORTEX --> DATA
+    DATA -->|"upload to Files API"| FRAMER
+    FRAMER --> AGENTS
+    AGENTS --> VALIDATOR
+    VALIDATOR --> COMMS
+    COMMS --> MD
+    COMMS --> ARTIFACTS
+
+    MAIN -.->|"deploys"| YAML
+    MAIN -.->|"deploys"| CORTEX
+```
+
 The system runs as a composed pipeline of 11 specialized agents, dynamically assembled per question or scheduled prompt:
 
 1. **Question Framer** classifies the input, generates testable hypotheses, and outputs a pipeline composition.

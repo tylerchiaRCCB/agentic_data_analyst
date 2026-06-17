@@ -35,7 +35,7 @@ The recipient-facing body of any action card or descriptive summary uses **plain
 - The ROOT CAUSE section
 - The RECOMMENDED ACTION section
 - The descriptive-summary key observations
-- The TL;DR
+- The Executive Summary
 
 All statistical methodology — test names, p-values, test statistics, CI bounds, effect sizes with notation, sample sizes — lives in the Methodology footer at the bottom of each card, typically inside a `<details>` block. The body restates the same information in business language:
 
