@@ -72,7 +72,7 @@ One row = one **UPC × Store × Date**. `DATE_SID` is a VARCHAR date key in `YYY
 ## Business Context
 - **FTPR** (First Time Pick Rate) is the primary OPD service metric. Higher is better. Target is typically ≥ 95%.
 - **Nil-picks** are failed picks — the item was ordered but not available on the shelf at pick time. Lower is better.
-- Nil-picks can be attributed to **KO responsibility** (supplier didn't deliver / out of stock at DC) or **Walmart responsibility** (store didn't shelve / phantom inventory).
+- Nil-pick attribution flags exist (`TY_NIL_PICK_KO_FLAG`, `TY_NIL_PICK_WM_FLAG`, `TY_NIL_PICK_POSSIBLE_PI`) but their exact definitions are unconfirmed — verify meaning with the Walmart OPD data owner before interpreting.
 - Nil Pick rate can be calculated as SCHDL_NIL_PICK_RATE_NMRTR / SCHDL_NIL_PICK_RATE_DNMNTR
 - **Pre-substitution** happens when the customer picks an alternative before the order is picked. **Post-substitution** happens when the picker substitutes at pick time.
 - **Scheduled vs unscheduled nil-picks** distinguish between picks that fail during the planned window vs outside it.
@@ -81,7 +81,7 @@ One row = one **UPC × Store × Date**. `DATE_SID` is a VARCHAR date key in `YYY
 ## Relationship Hypotheses
 When analyzing in-stock drivers, consider these cross-table relationships:
 - **DC Performance**: Join OPD → `V_STORE_CUSTOMER` to group FTPR/nil-pick rates by distribution center. Identify which DCs have the worst in-stock metrics and whether KO attribution is concentrated.
-- **Delivery Execution**: Join OPD → `V_STORE_CUSTOMER` → `F_DELIVERY_STOP_DTL_V` to correlate delivery volume and frequency with FTPR. Stores receiving more frequent deliveries may have better shelf availability.
+- **Delivery Execution**: Join OPD → `V_STORE_CUSTOMER` → `F_DELIVERY_STOP_DTL_V` to correlate delivery volume and frequency with FTPR. **Coverage note (verified Jan 2025 – Apr 2026)**: 563 of 623 OPD stores (90.4%) have active RCCB delivery (`DELIVERED_QTY > 0` in at least one stop). 43 stores (6.9%) have a `CUSTOMER_SID` but no rows in `F_DELIVERY_STOP_DTL_V` — these are genuine no-delivery stores. 17 stores (2.7%) have no `CUSTOMER_SID` at all (bridge miss). Any pipeline output reporting far fewer delivery-active stores is a SQL aggregation artifact, not ground truth — validate delivery SQL against this diagnostic before interpreting coverage.
 - **Merch Execution**: Join OPD → `V_STORE_CUSTOMER` → `F_STOP` to test whether stores with more merchandising visits or longer merch time have better FTPR. Filter `ROLE LIKE '%MERCH%'` for merch stops, `ROLE = 'DC'` for delivery stops.
 - **Product-Level Supply**: Join OPD → `V_UPC_PRODUCT` → `F_DELIVERY_STOP_DTL_V` to analyze delivery volume at the product level. Products with low delivery frequency relative to pick demand may have higher nil-pick rates.
 - **Calendar Effects**: Join OPD → `D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V` to check for holiday impacts, day-of-week patterns, and fiscal period trends on in-stock performance.

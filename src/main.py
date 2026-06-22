@@ -69,6 +69,8 @@ class CLIArgs:
     output_dir: Path
     no_upload: bool
     dry_run: bool
+    prior_run_id: str | None
+    use_latest_run_context: bool
 
 
 def parse_args() -> CLIArgs:
@@ -139,6 +141,17 @@ def parse_args() -> CLIArgs:
         "'foundry-dev' uses Azure AI Foundry dev environment (raghu-anthropic-dev key). "
         "'azure-openai' uses Azure OpenAI (raghu-openai key, GPT models via LiteLLM).",
     )
+    p.add_argument(
+        "--prior-run-id",
+        type=str,
+        default=None,
+        help="Prior run ID to load as context (e.g., 20260618T141448Z-483d87f3).",
+    )
+    p.add_argument(
+        "--use-latest-run-context",
+        action="store_true",
+        help="Auto-load the latest completed run from runs/ as context.",
+    )
     a = p.parse_args()
 
     if not a.scheduled and not a.question:
@@ -149,6 +162,8 @@ def parse_args() -> CLIArgs:
         p.error("--source=cortex_analyst requires --semantic-view or --domain.")
     if a.source == "file" and not a.data:
         p.error("--source=file requires --data.")
+    if a.prior_run_id and a.use_latest_run_context:
+        p.error("Use either --prior-run-id or --use-latest-run-context, not both.")
 
     return CLIArgs(
         question=a.question,
@@ -163,12 +178,101 @@ def parse_args() -> CLIArgs:
         output_dir=a.output_dir,
         no_upload=a.no_upload,
         dry_run=a.dry_run,
+        prior_run_id=a.prior_run_id,
+        use_latest_run_context=a.use_latest_run_context,
     )
 
 
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _truncate_text(text: str, max_chars: int = 8_000) -> str:
+    """Bound long fields so per-run JSONL logs remain compact."""
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}... [truncated {len(text) - max_chars} chars]"
+
+
+def _resolve_latest_run_id(runs_root: Path) -> str | None:
+    """Return the latest run directory id that contains run.jsonl."""
+    if not runs_root.exists():
+        return None
+    candidates: list[str] = []
+    for p in runs_root.iterdir():
+        if not p.is_dir():
+            continue
+        if (p / "run.jsonl").exists():
+            candidates.append(p.name)
+    if not candidates:
+        return None
+    return sorted(candidates)[-1]
+
+
+def _load_previous_run_context(
+    *,
+    run_id: str,
+    runs_root: Path = Path("runs"),
+    output_dir: Path = Path("output"),
+    max_markdown_chars: int = 12_000,
+) -> dict[str, Any] | None:
+    """Load bounded prior-run context for recurring weekly analysis continuity."""
+    run_dir = runs_root / run_id
+    if not run_dir.exists():
+        return None
+
+    context: dict[str, Any] = {"run_id": run_id}
+
+    # 1) Previous recipient-facing markdown (preferred, if present)
+    md_candidates = [
+        output_dir / f"{run_id}.md",
+        output_dir / f"{run_id}-pending-review.md",
+    ]
+    for md in md_candidates:
+        if md.exists():
+            context["output_markdown_preview"] = _truncate_text(
+                md.read_text(encoding="utf-8"),
+                max_chars=max_markdown_chars,
+            )
+            context["output_markdown_path"] = str(md)
+            break
+
+    # 2) Communication-agent payload (structured summary fallback)
+    comm_candidates = sorted((run_dir / "artifacts").glob("*-communication-agent*.json"))
+    if comm_candidates:
+        with comm_candidates[-1].open("r", encoding="utf-8") as f:
+            comm = json.load(f)
+        payload = comm.get("payload", {})
+        context["communication_payload_summary"] = {
+            "output_mode": payload.get("output_mode"),
+            "action_card_count": len(payload.get("action_cards", [])) if isinstance(payload.get("action_cards", []), list) else None,
+            "rendered_output_markdown_preview": _truncate_text(
+                payload.get("rendered_output_markdown", ""),
+                max_chars=max_markdown_chars,
+            ),
+        }
+
+    # 3) Pull the prior submitted prompt/question from run.jsonl when available
+    run_jsonl = run_dir / "run.jsonl"
+    if run_jsonl.exists():
+        with run_jsonl.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("msg", "").startswith("Prompt submitted"):
+                    attrs = event.get("attrs", {})
+                    if isinstance(attrs, dict):
+                        context["previous_prompt"] = {
+                            "mode": attrs.get("mode"),
+                            "question": attrs.get("question"),
+                            "proactive_prompt": attrs.get("proactive_prompt"),
+                        }
+                    break
+
+    return context
 
 
 def main() -> int:
@@ -247,6 +351,32 @@ def main() -> int:
     tracer = Tracer(run_id=run_id)
     lineage = LineageTracker(run_id=run_id)
 
+    prior_run_id = args.prior_run_id
+    if args.use_latest_run_context and not prior_run_id:
+        prior_run_id = _resolve_latest_run_id(Path("runs"))
+
+    previous_run_context: dict[str, Any] | None = None
+    if prior_run_id:
+        if prior_run_id == run_id:
+            run_logger.warning("Skipping prior run context because run_id matches current run", run_id=run_id)
+        else:
+            previous_run_context = _load_previous_run_context(
+                run_id=prior_run_id,
+                runs_root=Path("runs"),
+                output_dir=args.output_dir,
+            )
+            if previous_run_context:
+                run_logger.info(
+                    "Loaded prior run context",
+                    prior_run_id=prior_run_id,
+                    context_keys=sorted(previous_run_context.keys()),
+                )
+            else:
+                run_logger.warning(
+                    "Requested prior run context not found; continuing without it",
+                    prior_run_id=prior_run_id,
+                )
+
     run_logger.info("Pipeline run starting", run_id=run_id, data=str(args.data or args.semantic_view), domain=args.domain or "(none)")
 
     # ---- Acquire data: file-based or Cortex Analyst ----
@@ -286,6 +416,13 @@ def main() -> int:
                 columns=len(response.dataframe.columns) if not response.dataframe.empty else 0,
                 sql_chars=len(response.generated_sql),
                 request_id=response.request_id,
+            )
+            run_logger.info(
+                "Cortex SQL generated",
+                request_id=response.request_id,
+                semantic_model=semantic_model_name,
+                semantic_view=args.semantic_view or "",
+                sql=_truncate_text(response.generated_sql),
             )
 
         if response.dataframe.empty:
@@ -365,6 +502,7 @@ def main() -> int:
         budget=budget,
         lineage=lineage,
         domain=args.domain,
+        previous_run_context=previous_run_context,
     )
 
     proactive_prompt: str | None = None
@@ -373,11 +511,20 @@ def main() -> int:
             sp = yaml.safe_load(f)
         proactive_prompt = sp.get("prompt", "Weekly anomaly scan.")
 
+    run_logger.info(
+        "Prompt submitted",
+        mode="scheduled" if args.scheduled else "interactive",
+        question=args.question or "",
+        proactive_prompt=proactive_prompt or "",
+        prompt_config=str(args.prompt_config) if args.prompt_config else "",
+    )
+
     with tracer.span("pipeline.question_framer"):
         framer_payload = executor.invoke_framer(
             user_question=args.question or "",
             proactive_prompt=proactive_prompt,
             data_summary=data_summary,
+            previous_run_context=previous_run_context,
         )
 
     run_logger.info(

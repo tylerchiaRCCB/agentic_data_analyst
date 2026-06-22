@@ -74,6 +74,29 @@ uv run python -m src.main --question "X" --data data/sample/<file>.csv --dry-run
 
 Suggest this after any prompt-assembly or schema change. It's free and 30 seconds.
 
+### Recurring weekly runs with prior-run context
+
+When the user runs the same weekly question, suggest prior-run context loading for
+trend continuity:
+
+```bash
+# Use latest completed run automatically
+uv run python -m src.main --scheduled \
+	--prompt-config config/prompts/weekly-anomaly-scan.yaml \
+	--source cortex_analyst --domain walmart-opd --backend foundry-dev \
+	--use-latest-run-context
+
+# Or provide explicit run id
+uv run python -m src.main --scheduled \
+	--prompt-config config/prompts/weekly-anomaly-scan.yaml \
+	--source cortex_analyst --domain walmart-opd --backend foundry-dev \
+	--prior-run-id 20260618T141448Z-483d87f3
+```
+
+Guardrail: prior-run context is reference context only (trend/persistence checks).
+Do not suggest copy-forward of prior numeric claims; current-run computations remain
+the source of truth.
+
 ## What NOT to suggest
 
 - **Anthropic-specific optimizations that break the LLMClient abstraction.** The provider abstraction at [src/api/llm_client.py](../src/api/llm_client.py) lets the team A/B test OpenAI / Gemini via LiteLLM. Don't suggest changes that re-couple agent logic to the Anthropic SDK.

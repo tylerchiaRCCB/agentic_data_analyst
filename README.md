@@ -189,7 +189,28 @@ uv run python -m src.main \
   --question "..." \
   --data path/to/your.csv \
   --domain commercial-sales
+
+# Recurring weekly run: include prior run as context for trend continuity
+uv run python -m src.main \
+  --scheduled \
+  --prompt-config config/prompts/weekly-anomaly-scan.yaml \
+  --source cortex_analyst \
+  --domain walmart-opd \
+  --backend foundry-dev \
+  --use-latest-run-context
+
+# Or pin an explicit prior run id
+uv run python -m src.main \
+  --scheduled \
+  --prompt-config config/prompts/weekly-anomaly-scan.yaml \
+  --source cortex_analyst \
+  --domain walmart-opd \
+  --backend foundry-dev \
+  --prior-run-id 20260618T141448Z-483d87f3
 ```
+
+Prior-run context is used for continuity only (trend comparison, persistence checks).
+All numeric claims must still be recomputed from current-run data.
 
 Outputs:
 - **Recipient-facing markdown** — `output/<run_id>.md` (the Communication Agent's rendered output)
@@ -211,6 +232,10 @@ The system enforces several disciplines structurally, not just via prompts:
 - **Parallel execution.** When the Question Framer emits a parallel group (e.g., the 3 analytical agents), the executor runs them concurrently in a thread pool. ~6-8 min off typical full-run wall time.
 - **Human-in-the-loop gate.** Set `hitl_review_threshold` (e.g., `"A"`) to hold high-confidence findings for human review before delivery. Disabled by default; enable for production deployments where findings drive business-impacting decisions.
 - **Structured JSON logs.** `runs/<run_id>/run.jsonl` is machine-parseable; each line carries timestamp, level, run_id, msg, and structured attrs. Ready for ingestion by Datadog/Splunk/etc.
+- **Recurring-run memory with guardrails.** `--use-latest-run-context` or
+  `--prior-run-id` loads bounded context from a prior run (prior prompt + comms
+  summary + output preview) into the Question Framer and downstream agents. This
+  supports week-over-week continuity while preserving current-run recomputation.
 - **Mock-SDK integration tests.** Orchestrator behavior (retry-once, skip-and-flag, hard-fail, budget-cap abort) is fully unit-tested without spending real API tokens. Regressions found in 1 second of pytest, not $10 of API calls.
 
 ### Tools — partial-pipeline replay and context-gap extraction
