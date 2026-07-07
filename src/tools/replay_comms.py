@@ -114,6 +114,30 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # ---- Azure Key Vault: load ANTHROPIC_API_KEY if not already set ----
+    import os
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            from azure.identity import AzureCliCredential, DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+
+            vault_url = "https://glccbdsdevkv.vault.azure.net/"
+            secret_name = "chris-anderson-anthropic"
+            try:
+                credential = DefaultAzureCredential()
+                client = SecretClient(vault_url=vault_url, credential=credential)
+                secret = client.get_secret(secret_name)
+                cred_name = "DefaultAzureCredential"
+            except Exception:
+                credential = AzureCliCredential()
+                client = SecretClient(vault_url=vault_url, credential=credential)
+                secret = client.get_secret(secret_name)
+                cred_name = "AzureCliCredential"
+            os.environ["ANTHROPIC_API_KEY"] = secret.value
+            logger.info(f"Loaded ANTHROPIC_API_KEY from Azure Key Vault ({cred_name})")
+        except Exception as e:
+            logger.error(f"Failed to load ANTHROPIC_API_KEY from Azure Key Vault: {e}")
+
     run_dir = REPO_ROOT / "runs" / args.run_id
     if not run_dir.is_dir():
         logger.error("Run directory not found: %s", run_dir)

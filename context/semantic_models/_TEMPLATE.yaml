@@ -1,7 +1,7 @@
 # Cortex Analyst Semantic Model — TEMPLATE
 #
 # Copy this file to context/semantic_models/<domain>.yaml and fill in for
-# each business domain (e.g. walmart_ogp, supply_chain, production_operations,
+# each business domain (e.g. walmart_opd, supply_chain, production_operations,
 # trade_marketing, commercial_sales, finance).
 #
 # This file follows Snowflake Cortex Analyst's semantic model spec. See:
@@ -28,7 +28,7 @@ description: |
   from the Retail Link export."
 
 tables:
-  - name: <fully qualified table name, e.g. ANALYTICS.WALMART_OGP_FACT>
+  - name: <fully qualified table name, e.g. ANALYTICS.WALMART_OPD_FACT>
     description: One-line description of the table.
     base_table:
       database: <database>

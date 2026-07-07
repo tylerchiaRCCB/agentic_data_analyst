@@ -40,7 +40,7 @@ These are tiers, not strict role buckets. A specific recipient's tier comes from
 
 ### Confidence language
 The grade itself doesn't change by tier — a grade-B finding is grade-B regardless of recipient. But the **framing of the grade** can adapt:
-- **IC sees:** *"Confidence: B. The pattern is robust; one caveat noted below — partial-data refresh in 2 of the 4 weeks may understate the magnitude."*
+- **IC sees:** *"The pattern is robust; one caveat noted below — partial-data refresh in 2 of the 4 weeks may understate the magnitude."*
 - **Executive sees:** *"Initial signal; magnitude estimate has a 4–8 pt margin of uncertainty."* — same information, executive-tier register.
 
 ## What stays the same across tiers
@@ -58,6 +58,7 @@ The grade itself doesn't change by tier — a grade-B finding is grade-B regardl
 3. **Aggregate where the tier expects aggregation.** A manager's summary should not be the IC card with the contact line removed; it should be a manager-tier render that reasons across their span.
 4. **Never invent detail at higher tiers.** Executive-level framings should *compress* what's known, not *speculate* beyond it. If the IC card says *"likely driven by delivery-window changes,"* the executive card doesn't escalate that to *"clear operational failure"* — it preserves the original calibration.
 5. **Default to plain business English.** Recipients are operational decision-makers, not analysts. Technical / statistical / data-science jargon belongs in the `<details>` Methodology footer, not in the body of cards or summaries. If a term cannot be replaced by a common English phrase, define it on first use.
+6. **Optimize for fast use.** A recipient should be able to answer three questions in under 60 seconds: What changed? Why do I care? What do I do now?
 
 ## Plain-language translation (mandatory)
 
@@ -86,6 +87,12 @@ The following technical or data-analysis terms commonly leak into agent emission
 | "data slice" *(in body text)* | the actual scope — e.g., "Northeast region during the holiday period" |
 
 The general rule: **if a typical business reader (Account Manager, plant manager, sales lead) would need to Google a word to understand it, replace it.** Specific domain terms the business uses (e.g., FTPR, nil-pick rate, KO/WM attribution) ARE business English and should be preserved — they're the language of the recipient, not jargon imposed on them.
+
+Additional quick-read rules:
+- Prefer short bullets over dense paragraphs.
+- Use one number per sentence when possible.
+- Place method details in `<details>`, not in the visible body.
+- End each card with one clear forwardable action sentence.
 
 ## When the stakeholder map doesn't specify
 

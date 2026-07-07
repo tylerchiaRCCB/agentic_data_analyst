@@ -294,7 +294,7 @@ def test_statistic_kruskal_wallis_omnibus_test_validates() -> None:
     test as a group_comparison Statistic, with eta_squared as effect size
     and no CI. This is the legitimate analytical pattern for multi-group
     distribution-difference tests. Used to reject at the artifact layer; now
-    accepted. See commit retrospective on Walmart-OGP first real run."""
+    accepted. See commit retrospective on Walmart-OPD first real run."""
     from src.orchestrator.schemas import LineageRef, Statistic
     s = Statistic(
         id="stat_ftpr_category_kruskal",

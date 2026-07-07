@@ -654,7 +654,7 @@ class DataProfilerPayload(StrictModel):
     # Inner value types are deliberately Any — agents may include None for
     # "no value to report" (e.g., null concentration when there are no nulls)
     # or richer structures (e.g., a "concentration" object listing where nulls cluster).
-    completeness: dict[str, dict[str, Any]]
+    completeness: dict[str, Any]
     freshness: dict[str, Any]
     grain: dict[str, Any]
     distributions: dict[str, dict[str, Any]]
@@ -1136,6 +1136,7 @@ class Artifact(StrictModel):
 # correctly shaped when Pydantic sees it.
 _KNOWN_ENVELOPE_KEYS: frozenset[str] = frozenset({
     "$PARAMETER_VALUE",
+    "$PARAMETER_NAME",
     "input",         # tool_use's own param name; sometimes echoed back
     "parameters",
     "arguments",     # OpenAI-style function-calling convention; occasionally leaks

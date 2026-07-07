@@ -66,9 +66,10 @@ class ClaudeResponse:
 class ClaudeClient:
     """Wrapper around `anthropic.Anthropic` — the Anthropic implementation of LLMClient.
 
-    Initialization reads `ANTHROPIC_API_KEY` from the environment by default.
-    For production, this will be swapped for Azure AI Foundry per
-    `orchestration/pipeline-definitions.md` §10's data-flow section.
+    Supports two backends:
+    - "anthropic" (default): Direct Anthropic API via ANTHROPIC_API_KEY.
+    - "foundry": Azure AI Foundry (AnthropicFoundry). Data stays in Azure.
+      Requires `base_url` and either `api_key` or Azure AD token.
 
     Implements the LLMClient protocol in src/api/llm_client.py. Other providers
     (OpenAI, Gemini) go through LiteLLMClient — Anthropic stays on the native
@@ -88,11 +89,33 @@ class ClaudeClient:
     def supports_prompt_caching(self) -> bool:
         return True
 
-    def __init__(self, api_key: str | None = None, max_retries: int = 5) -> None:
-        # The SDK retries internally on transient errors; we add an additional
-        # logical-retry layer at the orchestrator level per failure-recovery.md §2.
-        self._client = anthropic.Anthropic(api_key=api_key, max_retries=0)
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_retries: int = 5,
+        backend: str = "anthropic",
+        base_url: str | None = None,
+    ) -> None:
+        if backend == "foundry":
+            from anthropic import AnthropicFoundry
+            if not base_url:
+                raise ValueError("base_url is required for 'foundry' backend")
+            self._client = AnthropicFoundry(
+                api_key=api_key,
+                base_url=base_url,
+                max_retries=0,
+            )
+            logger.info("ClaudeClient using Azure AI Foundry backend: %s", base_url)
+        else:
+            self._client = anthropic.Anthropic(api_key=api_key, max_retries=0)
+            logger.info("ClaudeClient using direct Anthropic backend")
         self._max_retries = max_retries
+        self._backend = backend
+        # Azure AI Foundry deployments may not have all models. Map unavailable
+        # models to the deployed one. Update this dict as new deployments are added.
+        self._foundry_model_map: dict[str, str] = {
+            "claude-sonnet-4-6": "claude-opus-4-7",
+        }
 
     # ---------- Files API: upload dataset once per run ----------
 
@@ -160,6 +183,12 @@ class ClaudeClient:
             betas.append(BETA_CODE_EXECUTION)
         if enable_files_api:
             betas.append(BETA_FILES_API)
+
+        # Remap model for Foundry if the requested deployment doesn't exist.
+        if self._backend == "foundry" and model in self._foundry_model_map:
+            original_model = model
+            model = self._foundry_model_map[model]
+            logger.info("Foundry model remap: %s → %s", original_model, model)
 
         attempt = 0
         delay = 2.0

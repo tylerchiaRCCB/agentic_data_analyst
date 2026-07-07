@@ -1,0 +1,615 @@
+name: tpo_insights
+description: |-
+  Trade Promotion Optimization (TPO) insights domain covering weekly promotional activity
+  by key account and promoted package group (PPG). This model enables analysis of which
+  promotions drive the most incremental volume lift and which key accounts respond most
+  effectively to specific promotion types. All metrics are scoped to active promotions
+  only (PPG is not null, promotion message is present, and EDV flag is false).
+tables:
+- name: TPO_V
+  description: |-
+    Weekly trade promotion data sourced from Anaplan. Each row represents a week-account-PPG combination with promotion details, pricing, and volume metrics. Rows are filtered to active promotions only: PPG must be populated, EVEN_OFFER_STANDARD must not equal 'No Message', and EDV must be false.
+  base_table:
+    database: CCB_DATASCIENCE_DEV
+    schema: TPO_ANAPLAN_ANALYSIS
+    table: TPO_V_PROMO_ONLY
+  dimensions:
+  - name: time_label
+    description: |-
+      Fiscal week label combining week number and fiscal year (e.g. "Week 49 FY24"). Use this for human-readable week identification in reports and filters.
+    expr: TIME
+    data_type: TEXT
+    synonyms:
+    - fiscal week
+    - week label
+    - promo week
+    - week period
+    sample_values:
+    - Week 49 FY24
+    - Week 52 FY26
+    - Week 19 FY27
+    - Week 33 FY24
+  - name: account
+    description: |-
+      Key account name representing the retail customer or banner where the promotion ran (e.g. "AO HYPERMASS - GLCC"). Used to compare promotional effectiveness across retail partners.
+    expr: ACCOUNT
+    data_type: TEXT
+    synonyms:
+    - key account
+    - retailer
+    - customer
+    - banner
+    sample_values:
+    - AO HYPERMASS - GLCC
+  - name: ppg
+    description: |-
+      Promoted Package Group (PPG) — the product grouping that was promoted during the week.
+    expr: PPG
+    data_type: TEXT
+    synonyms:
+    - promoted package group
+    - product group
+    - promo package
+    - PPG
+    sample_values:
+    - SSD ABR CAN 7.5z/222m 6pk 4
+  - name: holiday
+    description: |-
+      Holiday or seasonal event associated with the promotion week (e.g. Halloween, Super Bowl, Pre-Xmas). Approximately 57% of weeks have no holiday association. Useful for segmenting promotional lift by seasonal context.
+    expr: HOLIDAYS
+    data_type: TEXT
+    synonyms:
+    - holiday event
+    - seasonal event
+    - holiday period
+    - occasion
+    sample_values:
+    - Post-TG
+    - Post-Xmas
+    - Halloween
+    - Pre-Xmas
+    - Super Bowl
+  - name: fiscal_year
+    description: |-
+      Fiscal year label (e.g. FY24, FY25, FY26, FY27). Use for year-over-year promotional performance comparisons.
+    expr: YEAR
+    data_type: TEXT
+    synonyms:
+    - fiscal year
+    - FY
+    - year
+    - promo year
+    sample_values:
+    - FY24
+    - FY25
+    - FY26
+    - FY27
+  - name: week_number
+    description: |-
+      Fiscal week number within the fiscal year (1–53). Use alongside fiscal_year for precise week-level filtering and trending.
+    expr: WEEK_NUM
+    data_type: NUMBER
+    synonyms:
+    - week num
+    - fiscal week number
+    - week of year
+    - promo week number
+    sample_values:
+    - '49'
+    - '52'
+    - '19'
+    - '33'
+    - '44'
+  - name: event_offer_rpa
+    description: |-
+      Promotion offer description in RPA format (e.g. "25 $5.99 MB2" means 2025 pricing at $5.99 per unit with a must-buy-2 requirement). Currently 100% null in the raw data — confirm upstream ETL population before use.
+    expr: EVENT_OFFER_RPA
+    data_type: TEXT
+    synonyms:
+    - RPA offer
+    - promo offer code
+    - event offer
+    - promotion description
+    sample_values: []
+  - name: even_offer_standard
+    description: |-
+      Standardized promotion offer description (e.g. "25 $5.99 MB2" means 2025 pricing at $5.99 per unit with a must-buy-2 requirement). Rows where this equals 'No Message' are excluded by the mandatory scope filter, so all visible rows represent active, communicated promotions.
+    expr: EVEN_OFFER_STANDARD
+    data_type: TEXT
+    synonyms:
+    - promo offer
+    - offer description
+    - promotion message
+    - deal description
+    sample_values:
+    - No Message
+  - name: edv_flag
+    description: |-
+      Every Day Value flag. When true, the item is priced at a permanent low price and is NOT considered a true promotional event. The mandatory scope filter excludes EDV = true rows, so all visible rows are genuine promotions.
+    expr: EDV
+    data_type: TEXT
+    synonyms:
+    - every day value
+    - EDV
+    - everyday low price
+    - EDLP flag
+    sample_values:
+    - 'false'
+    - 'true'
+  - name: in_ad_flag
+    description: |-
+      Indicates whether the promotion was featured in a retailer advertisement (circular, digital ad, etc.). Helps distinguish in-ad versus off-shelf promotional activity.
+    expr: IN_AD
+    data_type: TEXT
+    synonyms:
+    - in ad
+    - advertised promotion
+    - circular feature
+    - ad feature
+    sample_values:
+    - 'false'
+    - 'true'
+  - name: acceleration_flag
+    description: |-
+      Indicates whether the promotion is classified as an acceleration event, typically a deeper or more aggressive promotional mechanic designed to drive outsized volume.
+    expr: ACCELERATION
+    data_type: TEXT
+    synonyms:
+    - acceleration event
+    - accelerated promo
+    - deep discount flag
+    - acceleration
+    sample_values:
+    - 'false'
+    - 'true'
+  - name: digital_deal_flag
+    description: |-
+      Indicates whether the promotion was executed as a digital deal (e.g. app coupon, loyalty program offer). Useful for comparing digital versus traditional promotional effectiveness.
+    expr: DIGITAL_DEAL
+    data_type: TEXT
+    synonyms:
+    - digital deal
+    - digital offer
+    - app deal
+    - digital coupon
+    sample_values:
+    - 'false'
+    - 'true'
+  - name: flavor_segmentation_flag
+    description: |-
+      Indicates whether the promotion was targeted at a specific flavor segment rather than the full PPG assortment.
+    expr: FLAVOR_SEGMENTATION
+    data_type: TEXT
+    synonyms:
+    - flavor segment
+    - flavor targeted
+    - flavor promo
+    - segmented promotion
+    sample_values:
+    - 'false'
+    - 'true'
+  - name: message_type
+    description: |-
+      Promotion message type classification. Currently 100% null in the raw data snapshot — confirm upstream ETL population before use.
+    expr: MESSAGE_TYPE
+    data_type: TEXT
+    synonyms:
+    - promo type
+    - message category
+    - offer type
+    - promotion category
+    sample_values: []
+  time_dimensions:
+  - name: promo_week_start
+    description: |-
+      Calendar date of the first day (Monday) of the promotional week. Use this field for date-range filtering, trending over time, and joining to calendar tables. Stored as TEXT in the source but represents a YYYY-MM-DD date value.
+    expr: TRY_TO_DATE(PROMO_WEEK_START)
+    data_type: DATE
+    synonyms:
+    - week start date
+    - promotion start date
+    - week beginning
+    - promo date
+  measures:
+  - name: retail_units
+    description: |-
+      Total retail units sold during the promotional week, converted from SPC (standard pack count) to consumer units using the per-SPC conversion factor. Scoped to active promotions only (PPG not null, offer message present, EDV = false). Formula: SUM(RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - units sold
+    - total units
+    - retail volume
+    - consumer units
+  - name: base_retail_units
+    description: |-
+      Projected baseline retail units that would have sold in the absence of any promotion, converted to consumer units. Used as the denominator for calculating incremental lift. Scoped to active promotions only. Formula: SUM(BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - baseline units
+    - base volume
+    - non-promo units
+    - expected units without promotion
+  - name: spc_increase
+    description: |-
+      Incremental SPC units driven by the promotion, calculated as actual SPC units minus baseline SPC units. Positive values indicate the promotion drove additional volume above the baseline. Scoped to active promotions only. Formula: SUM(RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - incremental SPC units
+    - SPC lift
+    - incremental volume SPC
+    - promo-driven SPC increase
+  - name: retail_dollars
+    description: |-
+      Total retail sales dollars generated during the promotional week, calculated as actual consumer units multiplied by the average weighted retail price per unit. Scoped to active promotions only. Formula: SUM(RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC * AVG_WEIGHTED_RETAIL_UNIT).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC * AVG_WEIGHTED_RETAIL_UNIT
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - retail sales
+    - retail revenue
+    - sales dollars
+    - promo revenue
+  - name: total_promo_price
+    description: |-
+      Total price paid by the consumer for the promoted purchase bundle (e.g. the total cost of a must-buy-2 offer). Scoped to active promotions only.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN TOTAL_PRICE
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - promo total price
+    - bundle price
+    - promoted price total
+    - deal price
+  - name: communicated_promo_price
+    description: |-
+      The advertised or shelf-communicated promotional price per unit. Scoped to active promotions only.
+    expr: |-
+      AVG(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN COMMUNICATED_PRICE_PROMO
+          ELSE NULL
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - promo price
+    - advertised price
+    - shelf promo price
+    - communicated price
+  - name: white_tag_price
+    description: |-
+      Regular (non-promotional) retail shelf price per unit, also known as the white tag or everyday retail price. Scoped to active promotions only.
+    expr: |-
+      AVG(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN WHITE_TAG_PRICE
+          ELSE NULL
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - regular price
+    - everyday price
+    - shelf price
+    - non-promo price
+  - name: avg_weighted_retail_unit_price
+    description: |-
+      Average price per consumer unit actually sold during the promotional week, weighted by volume. Reflects the blended price across promoted and non-promoted purchases within the week. Scoped to active promotions only.
+    expr: |-
+      AVG(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN AVG_WEIGHTED_RETAIL_UNIT
+          ELSE NULL
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - average retail price
+    - weighted average price
+    - avg unit price
+    - blended retail price
+  - name: redemption_rate
+    description: |-
+      Percentage of total purchases during the promotional week that redeemed the promotion offer. Higher redemption rates indicate stronger shopper engagement with the promotion mechanic. Scoped to active promotions only. Expressed as a rate; use total_retail_units as the guardrail counter.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN REDEMPTION_RATE
+          ELSE 0
+        END
+      ) / NULLIF(
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN 1
+            ELSE 0
+          END
+        ), 0
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - redemption percent
+    - offer take rate
+    - promo redemption
+    - coupon redemption rate
+  - name: percentage_discount
+    description: |-
+      Percentage discount off the regular white tag price delivered by the promotion. Calculated as the average discount rate across active promotion rows. Scoped to active promotions only. Expressed as a rate; use retail_dollars as the guardrail counter.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN PERCENTAGE__DISCOUNT
+          ELSE 0
+        END
+      ) / NULLIF(
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN 1
+            ELSE 0
+          END
+        ), 0
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - discount rate
+    - percent off
+    - promo discount
+    - discount percentage
+  - name: retail_margin_percentage
+    description: |-
+      Retailer gross margin percentage on the promoted item during the promotional week. Helps assess whether the promotion is financially sustainable for the retail partner. Scoped to active promotions only. Expressed as a rate; use retail_dollars as the guardrail counter.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN RETAIL_MARGIN_PERCENTAGE
+          ELSE 0
+        END
+      ) / NULLIF(
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN 1
+            ELSE 0
+          END
+        ), 0
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - retailer margin
+    - retail gross margin
+    - margin percent
+    - retailer profitability
+  - name: retail_unit_profit
+    description: |-
+      Profit per consumer unit at retail during the promotional week, reflecting the margin dollars earned per unit after accounting for the promotional price reduction. Scoped to active promotions only.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN RETAIL_UNIT_PROFIT
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - unit profit
+    - profit per unit
+    - retail profit
+    - margin per unit
+  - name: dnnsi
+    description: |-
+      Dead Net Net Selling Income (DNNSI) — the net revenue to the company after all trade spend, allowances, and deductions are applied. A key profitability metric for evaluating the true financial return of a promotion. Scoped to active promotions only.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN DNNSI
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - dead net net selling income
+    - net selling income
+    - DNNSI
+    - net revenue after trade
+  - name: dngp
+    description: |-
+      Dead Net Gross Profit (DNGP) — gross profit after all trade deductions, representing the company's bottom-line profitability from the promoted sale. Scoped to active promotions only.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN DNGP
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - dead net gross profit
+    - net gross profit
+    - DNGP
+    - promo gross profit
+  - name: incremental_retail_units
+    description: |-
+      Incremental consumer units driven by the promotion above the baseline (no-promotion) forecast. Calculated as actual retail units minus baseline retail units. This is the primary lift metric. Scoped to active promotions only. Formula: SUM((RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC) * RETAIL_UNITS_PER_SPC).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN (RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC)
+               * RETAIL_UNITS_PER_SPC
+          ELSE 0
+        END
+      )
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms:
+    - incremental units
+    - lift units
+    - promo lift
+    - volume lift
+  - name: unit_lift_rate
+    description: |-
+      Promotional unit lift rate — the ratio of incremental retail units to baseline retail units, expressed as a multiplier. A value of 0.20 means the promotion drove 20% more units than the baseline. Scoped to active promotions only. Formula: SUM(incremental units) / SUM(baseline units).
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN (RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC)
+               * RETAIL_UNITS_PER_SPC
+          ELSE 0
+        END
+      ) / NULLIF(
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC
+            ELSE 0
+          END
+        ), 0
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - lift rate
+    - promo lift ratio
+    - incremental lift ratio
+    - volume lift rate
+  - name: percent_lift
+    description: |-
+      Promotional percent lift — the ratio of incremental retail units to baseline retail units, expressed as a percentage. A value of 20 means the promotion drove 20% more units than the baseline. Scoped to active promotions only. Formula: 100 * SUM(incremental units) / SUM(baseline units).
+    expr: |-
+      100 * (
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN (RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC)
+                 * RETAIL_UNITS_PER_SPC
+            ELSE 0
+          END
+        ) / NULLIF(
+          SUM(
+            CASE
+              WHEN PPG IS NOT NULL
+               AND EVEN_OFFER_STANDARD <> 'No Message'
+              THEN BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC * RETAIL_UNITS_PER_SPC
+              ELSE 0
+            END
+          ), 0
+        )
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - percent lift
+    - promotional lift percent
+    - incremental lift percent
+    - lift percentage
+  - name: dnnsi_per_incremental_unit
+    description: |-
+      Dead Net Net Selling Income earned per incremental unit driven by the promotion. Measures the revenue efficiency of promotional lift. Higher values indicate more profitable promotions per unit of lift generated. Scoped to active promotions only.
+    expr: |-
+      SUM(
+        CASE
+          WHEN PPG IS NOT NULL
+           AND EVEN_OFFER_STANDARD <> 'No Message'
+          THEN DNNSI
+          ELSE 0
+        END
+      ) / NULLIF(
+        SUM(
+          CASE
+            WHEN PPG IS NOT NULL
+             AND EVEN_OFFER_STANDARD <> 'No Message'
+            THEN (RETAIL_UNITS_ACT_FCST_CONVERTED_TO_SPC - BASE_RETAIL_UNITS_ACTUAL_CONVERTED_TO_SPC)
+                 * RETAIL_UNITS_PER_SPC
+            ELSE 0
+          END
+        ), 0
+      )
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms:
+    - DNNSI per lift unit
+    - revenue per incremental unit
+    - net income per lift unit
+    - promo revenue efficiency

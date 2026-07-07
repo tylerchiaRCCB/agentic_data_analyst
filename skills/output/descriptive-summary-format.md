@@ -5,6 +5,22 @@
 
 If this skill is invoked, the run did its job. The data was examined, baselines were checked, and the analysis concluded — honestly — that nothing required attention. The descriptive summary documents that work so the recipient understands what was looked at, what would have constituted a finding, and that none was found.
 
+**BREVITY RULES:**
+- The entire Weekly Summary section (excluding `<details>` blocks) must be **under 600 words**.
+- "What's stable" = **3-6 one-line bullets**. Each bullet is ONE line — metric, value, direction.
+- "Structural observations" = **maximum 3 bullets, each 2 sentences max**. No paragraph-length observations.
+- "What would have constituted a finding" = **maximum 3 bullets**. Only the most decision-relevant thresholds.
+- "Conclusion" = **1-2 sentences**. State the all-clear.
+- Open data gaps table = **maximum 4 rows**. Only HIGH and MEDIUM priority.
+- All methodology and statistical detail goes in `<details>` blocks — never in the body.
+- **COMPRESS, DON'T DISCARD:** Any additional stable metrics, structural observations, thresholds checked, or data gaps beyond these limits go into the summary's `<details>` audit trail block. The body is the executive layer; `<details>` is the complete analyst record.
+
+**PLAIN-LANGUAGE RULES (strict):**
+- Write for non-analyst readers.
+- No statistical terms in the visible summary body.
+- Use business words, short sentences, and action-oriented phrasing.
+- If a detail needs analyst interpretation, move it to `<details>`.
+
 ## Why this output exists
 
 The strongest demonstration of the system's discipline is its ability to remain quiet when staying quiet is the right answer. A tool that fabricates findings to fill space erodes recipient trust on every run; a tool that produces a brief, useful descriptive summary on quiet weeks earns trust on every run.
@@ -60,6 +76,10 @@ The descriptive summary is rendered as native markdown — same principle as the
 
 </details>
 
+### Quick actions this week
+
+- <Optional: One to three practical follow-ups for teams, even when no action cards were issued.>
+
 ### Open data gaps
 
 | Priority | Gap | What would close it |
@@ -76,6 +96,7 @@ The descriptive summary is rendered as native markdown — same principle as the
 - **What's stable section first**: executives reading top-to-bottom see the all-clear before any caveats.
 - **Structural observations are clearly labeled as no-action**: they don't compete with cards for executive attention.
 - **Audit trail in collapsible `<details>`**: visible if someone wants it, invisible by default.
+- **Quick actions section**: gives operators immediate next steps without reading methodology.
 - **Open data gaps as a table**: visually scannable, prioritized, with the "what would close it" column right there.
 - **No `═══` separators**: visual hierarchy from markdown headers, not from ASCII art.
 

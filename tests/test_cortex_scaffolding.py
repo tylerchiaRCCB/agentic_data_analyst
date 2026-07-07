@@ -214,3 +214,37 @@ def test_cortex_agent_real_mode_raises_not_implemented(monkeypatch: pytest.Monke
     client = CortexAgentClient()
     with pytest.raises(NotImplementedError, match="real-mode is not yet wired"):
         client.run_workflow(task="t", semantic_model="walmart_in_store_execution")
+
+
+def test_tpo_target_detection_by_model_and_view() -> None:
+    from src.data_access.cortex_analyst_client import _is_tpo_target
+
+    assert _is_tpo_target("tpo_insights", None) is True
+    assert _is_tpo_target("other_domain", "CCB_DATASCIENCE_DEV.TPO_ANAPLAN_ANALYSIS.TPO_V_PROMO_ONLY") is True
+    assert _is_tpo_target("other_domain", "CCB_DATASCIENCE_DEV.WALMART_OPD.WALMART_OPD") is False
+
+
+def test_tpo_context_warnings_require_time_and_edv_columns() -> None:
+    from src.data_access.cortex_analyst_client import _tpo_context_warnings
+
+    minimal = pd.DataFrame(
+        {
+            "ACCOUNT": ["A"],
+            "PPG": ["P"],
+            "EVEN_OFFER_STANDARD": ["Offer"],
+            "INCREMENTAL_RETAIL_UNITS": [100],
+        }
+    )
+    warnings = _tpo_context_warnings(minimal)
+    assert any("TPO_CONTEXT_MISSING_TIME_COLUMNS" in w for w in warnings)
+    assert any("TPO_CONTEXT_MISSING_EDV_COLUMNS" in w for w in warnings)
+
+    complete = pd.DataFrame(
+        {
+            "FISCAL_YEAR": ["FY25"],
+            "WEEK_NUM": [12],
+            "PROMO_WEEK_START": ["2025-03-17"],
+            "EDV_SCOPE_APPLIED": [False],
+        }
+    )
+    assert _tpo_context_warnings(complete) == []

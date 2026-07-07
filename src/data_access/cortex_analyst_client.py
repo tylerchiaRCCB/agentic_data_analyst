@@ -70,6 +70,221 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEMANTIC_MODELS_DIR = REPO_ROOT / "context" / "semantic_models"
 
+# ---------------------------------------------------------------------------
+# Question reframing — Cortex is the DATA layer, not the ANALYTICS layer
+# ---------------------------------------------------------------------------
+# When the pipeline sends an analytical question ("What factors drive FTPR?"),
+# Cortex tries to answer it directly by pre-aggregating.  We need granular
+# rows (e.g. store × week) so downstream agents can run correlations, change-
+# point detection, etc.  These constants + helpers reframe analytical questions
+# into data-retrieval requests that preserve grain.
+
+# Keywords whose presence signals an analytical (not lookup) question.
+_ANALYTICAL_SIGNALS = frozenset({
+    "correlat", "relationship", "factor", "driv", "cause", "impact",
+    "predict", "explain", "compar", "trend", "pattern", "anomal",
+    "regress", "cluster", "segment", "outlier", "decompos", "forecast",
+    "associat", "affect", "influenc", "contribut", "depend", "vary",
+    "scatter", "distribut", "effect", "differ", "worst", "best",
+})
+
+# Keywords whose presence signals daily (not weekly) grain is needed.
+_DAILY_GRAIN_SIGNALS = frozenset({
+    "daily", "day-of-week", "day of week", "dayofweek", "intra-week",
+    "intraweek", "per day", "each day", "by day", "weekday", "weekend",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday",
+})
+
+# Minimum row count below which we consider the result over-aggregated for
+# an analytical question.  42 DC-level rows can't support correlation analysis.
+_MIN_ANALYTICAL_ROWS = 200
+
+# Delivery coverage guardrail: historical baseline from verified diagnostics is
+# ~563/623 active stores (~0.904). We do not hardcode that exact ratio in the
+# client, but we reject clearly under-covered retrievals and retry once with a
+# stricter SQL steering prompt.
+_MIN_DELIVERY_COVERAGE_RATIO = 0.60
+_DELIVERY_COVERAGE_WARNING_PREFIX = "DELIVERY_COVERAGE_LOW"
+
+_TPO_SEMANTIC_MODELS = frozenset({"tpo_insights"})
+
+
+def _is_analytical(question: str) -> bool:
+    """Return True if the question is analytical rather than a simple lookup."""
+    q = question.lower()
+    return any(signal in q for signal in _ANALYTICAL_SIGNALS)
+
+
+def _detect_grain(question: str) -> tuple[str, str]:
+    """Detect whether the question needs daily or weekly grain.
+
+    Returns (grain_hint, grain_description) tuple.
+    """
+    q = question.lower()
+    if any(signal in q for signal in _DAILY_GRAIN_SIGNALS):
+        return "STORE_NBR × DATE_SID (daily)", "one row per store per day"
+    return "STORE_NBR × WEEK (weekly)", "one row per store per week"
+
+
+def _reframe_for_retrieval(question: str, semantic_model_name: str) -> str:
+    """Wrap an analytical question with grain-preservation instructions.
+
+    The reframed question tells Cortex to act as a data-retrieval layer:
+    return granular rows with raw numerators/denominators so that downstream
+    statistical agents can do the actual analysis.
+
+    Auto-detects daily vs weekly grain based on question keywords.
+    """
+    grain_hint, grain_desc = _detect_grain(question)
+
+    # The raw OPD table is at UPC × Store × Date grain (millions of rows).
+    # Both daily and weekly modes MUST aggregate across UPCs using GROUP BY
+    # and SUM. Without this, Cortex returns the raw fact table.
+    if "daily" in grain_hint.lower():
+        group_by_clause = "GROUP BY STORE_NBR, DATE_SID"
+        agg_example = (
+            "SELECT STORE_NBR, DATE_SID, "
+            "SUM(FTPR_NMRTR) AS ftpr_nmrtr, SUM(FTPR_DNMNTR) AS ftpr_dnmntr, "
+            "SUM(NIL_PICK_QTY) AS nil_pick_qty ... "
+            "FROM table "
+            "GROUP BY STORE_NBR, DATE_SID"
+        )
+    else:
+        group_by_clause = (
+            "GROUP BY STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD'))"
+        )
+        agg_example = (
+            "SELECT STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start, "
+            "SUM(FTPR_NMRTR) AS ftpr_nmrtr, SUM(FTPR_DNMNTR) AS ftpr_dnmntr, "
+            "SUM(NIL_PICK_QTY) AS nil_pick_qty ... "
+            "FROM table "
+            "GROUP BY STORE_NBR, DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD'))"
+        )
+
+    return (
+        f"DATA RETRIEVAL REQUEST — you MUST aggregate with GROUP BY, not return raw rows.\n\n"
+        f"CRITICAL: The source table has one row per UPC × Store × Date. "
+        f"You MUST use {group_by_clause} and SUM() all metric columns "
+        f"to aggregate across UPCs. Do NOT select individual UPC rows. "
+        f"The result should have {grain_desc}, NOT one row per UPC per store per day.\n\n"
+        f"REQUIRED SQL PATTERN:\n{agg_example}\n\n"
+        f"RULES:\n"
+        f"- Return data at {grain_hint} grain ({grain_desc}).\n"
+        f"- Use SUM() for all numeric measure columns: FTPR_NMRTR, FTPR_DNMNTR, "
+        f"NIL_PICK_QTY, SCHDL_NIL_PICK_RATE_NMRTR, SCHDL_NIL_PICK_RATE_DNMNTR, etc.\n"
+        f"- Include dimension columns in GROUP BY: STORE_NBR, and optionally "
+        f"distribution center, category, brand as needed for the question.\n"
+        f"- Do NOT return raw UPC-level rows — the result must be under 100,000 rows.\n"
+        f"- Do NOT compute correlations, averages, or summary statistics.\n"
+        f"- Apply date filters and exclude sentinel values (STORE_NBR != 9999).\n\n"
+        f"QUESTION CONTEXT (what the analyst wants to explore — retrieve the "
+        f"data they need, do not answer it):\n{question}"
+    )
+
+
+def _is_delivery_related(question: str) -> bool:
+    """Return True when the question appears to require delivery metrics."""
+    q = question.lower()
+    return "delivery" in q or "delivered" in q
+
+
+def _is_tpo_target(semantic_model_name: str, semantic_view: str | None) -> bool:
+    """Return True when request targets the TPO semantic domain."""
+    if semantic_model_name.strip().lower() in _TPO_SEMANTIC_MODELS:
+        return True
+    if not semantic_view:
+        return False
+
+    sv = semantic_view.upper()
+    return "TPO_ANAPLAN_ANALYSIS" in sv or "TPO_" in sv
+
+
+def _tpo_context_guardrail() -> str:
+    """Steer Cortex to preserve time and EDV scope context in TPO retrievals."""
+    return (
+        "TPO CONTEXT GUARDRAIL:\n"
+        "- Preserve temporal context in the returned dataset. Include YEAR (or alias as FISCAL_YEAR), "
+        "WEEK_NUM (or alias as WEEK_NUMBER), and TRY_TO_DATE(PROMO_WEEK_START) AS PROMO_WEEK_START when available.\n"
+        "- If aggregating, include these time fields in GROUP BY so downstream agents can perform "
+        "time-based caveat checks.\n"
+        "- Preserve promotion-scope context in the returned dataset. Include EDV as EDV_FLAG when available. "
+        "If EDV is not exposed in the semantic target, include CAST(FALSE AS BOOLEAN) AS EDV_SCOPE_APPLIED.\n"
+        "- Keep the core business grain requested by the question (e.g., ACCOUNT × PPG × EVEN_OFFER_STANDARD) "
+        "while retaining the context fields above."
+    )
+
+
+def _tpo_context_warnings(df: pd.DataFrame) -> list[str]:
+    """Return warnings for missing TPO context columns in retrieved output."""
+    cols = {str(c).upper() for c in df.columns}
+    warnings: list[str] = []
+
+    has_fiscal_year = "FISCAL_YEAR" in cols or "YEAR" in cols
+    has_week = "WEEK_NUM" in cols or "WEEK_NUMBER" in cols
+    has_week_start = "PROMO_WEEK_START" in cols
+    has_edv_context = "EDV" in cols or "EDV_FLAG" in cols or "EDV_SCOPE_APPLIED" in cols
+
+    if not has_fiscal_year or not has_week or not has_week_start:
+        warnings.append(
+            "TPO_CONTEXT_MISSING_TIME_COLUMNS: expected fiscal year/week context "
+            "(YEAR or FISCAL_YEAR, WEEK_NUM or WEEK_NUMBER, PROMO_WEEK_START)."
+        )
+    if not has_edv_context:
+        warnings.append(
+            "TPO_CONTEXT_MISSING_EDV_COLUMNS: expected EDV_FLAG/EDV or EDV_SCOPE_APPLIED "
+            "to preserve promo-scope provenance."
+        )
+
+    return warnings
+
+
+def _delivery_retry_reframe(question: str) -> str:
+    """Stricter second-pass delivery guidance when coverage looks implausibly low."""
+    return (
+        "DELIVERY COVERAGE RETRY — previous SQL under-covered delivery-active stores.\n\n"
+        "MANDATORY LOGIC:\n"
+        "- Build delivery_active_week_flag as:\n"
+        "  MAX(COALESCE(IS_DELIVERY_ACTIVE_WEEK, CASE WHEN TOTAL_DELIVERED_QTY > 0 OR DELIVERY_STOP_COUNT > 0 THEN 1 ELSE 0 END))\n"
+        "  at STORE_NBR × WEEK grain.\n"
+        "- Aggregate across UPC rows first (SUM metrics, MAX activity flag).\n"
+        "- Do not group by raw delivery fact columns after computing the weekly flag.\n"
+        "- Exclude sentinel stores (STORE_NBR != 9999).\n"
+        "- Return weekly store-level rows with the delivery_active_week_flag available for downstream profiling.\n\n"
+        f"QUESTION CONTEXT:\n{question}"
+    )
+
+
+def _delivery_coverage_stats(df: pd.DataFrame) -> tuple[int, int, float] | None:
+    """Compute delivery active-store coverage from returned data when possible."""
+    cols = {str(c).upper(): c for c in df.columns}
+    store_col = cols.get("STORE_NBR")
+    if store_col is None or df.empty:
+        return None
+
+    delivery_flag_col = cols.get("IS_DELIVERY_ACTIVE_WEEK")
+    delivered_qty_col = cols.get("TOTAL_DELIVERED_QTY")
+    stop_count_col = cols.get("DELIVERY_STOP_COUNT")
+    if delivery_flag_col is None and delivered_qty_col is None and stop_count_col is None:
+        return None
+
+    local = df.copy()
+    active_series = pd.Series([False] * len(local), index=local.index)
+
+    if delivery_flag_col is not None:
+        active_series = active_series | local[delivery_flag_col].fillna(0).astype(float).gt(0)
+    if delivered_qty_col is not None:
+        active_series = active_series | local[delivered_qty_col].fillna(0).astype(float).gt(0)
+    if stop_count_col is not None:
+        active_series = active_series | local[stop_count_col].fillna(0).astype(float).gt(0)
+
+    local["__delivery_active"] = active_series
+    by_store = local.groupby(store_col, dropna=True)["__delivery_active"].max()
+    total = int(by_store.shape[0])
+    active = int(by_store.sum())
+    ratio = (active / total) if total else 0.0
+    return active, total, ratio
+
 
 @dataclass
 class CortexAnalystResponse:
@@ -112,17 +327,25 @@ class CortexAnalystClient:
         *,
         question: str,
         semantic_model: str,
-        limit: int | None = 100000,
+        semantic_view: str | None = None,
+        limit: int | None = 1_000_000,
+        query_timeout_seconds: int = 180,
     ) -> CortexAnalystResponse:
         """Submit a natural-language analytical question to Cortex Analyst.
 
         Parameters:
           question:        the analytical question (e.g. "weekly fill rate by DC
                            for the past 13 weeks").
-          semantic_model:  the semantic model name (e.g. "supply_chain"). The
-                           YAML file must exist at
-                           context/semantic_models/<semantic_model>.yaml.
+          semantic_model:  the semantic model name (e.g. "supply_chain"). Used
+                           as a label and to locate the YAML when sending inline.
+          semantic_view:   fully-qualified semantic view reference
+                           (e.g. "CCB_DATASCIENCE_DEV.WALMART_OPD.WALMART_OPD").
+                           When provided, the API uses the server-side view
+                           instead of sending YAML inline.
           limit:           row limit to apply (caps cost + token use downstream).
+          query_timeout_seconds: max seconds for the generated SQL to execute
+                           before Snowflake kills it. Prevents runaway full-table
+                           scans. Default 60s.
 
         Returns CortexAnalystResponse with the generated SQL, the resulting
         DataFrame, and any quality warnings.
@@ -134,20 +357,237 @@ class CortexAnalystClient:
         if self.mock_mode:
             return self._mock_response(question, semantic_model, limit)
 
-        # Real-mode implementation. Cortex Analyst is invoked via REST against
-        # the account's Snowflake endpoint. The exact endpoint, auth, and
-        # payload shape are documented at:
-        #
-        #   https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst
-        #
-        # This stub raises NotImplementedError until production credentials and
-        # the semantic model are in place. The interface above is stable; only
-        # the body of this branch will change when we wire the real call.
-        raise NotImplementedError(
-            "CortexAnalystClient.ask() real-mode is not yet wired. Set "
-            "SNOWFLAKE_MOCK=1 for scaffolding mode, or implement the REST call "
-            "against https://<account>.snowflakecomputing.com/api/v2/cortex/analyst/message "
-            "once production credentials and the semantic model are in place."
+        # ---- Reframe analytical questions for data retrieval ----
+        analytical = _is_analytical(question)
+        effective_question = (
+            _reframe_for_retrieval(question, semantic_model) if analytical else question
+        )
+        if analytical and _is_tpo_target(semantic_model, semantic_view):
+            effective_question = f"{effective_question}\n\n{_tpo_context_guardrail()}"
+        if _is_delivery_related(question):
+            effective_question = (
+                effective_question
+                + "\n\n"
+                + "DELIVERY COVERAGE GUARDRAIL: preserve delivery activity fields in the result "
+                + "(IS_DELIVERY_ACTIVE_WEEK, TOTAL_DELIVERED_QTY, DELIVERY_STOP_COUNT where available) "
+                + "at the requested grain."
+            )
+        if analytical:
+            logger.info(
+                "Analytical question detected — reframed for granular data retrieval"
+            )
+
+        # ---- Real-mode: call Cortex Analyst REST API ----
+        import requests
+
+        conn = self._snowflake.connect()
+        # Get a session token from the active Snowflake connection
+        token = conn.rest.token
+        account = self._snowflake.config.account
+
+        # Build the REST endpoint URL
+        # Account locator keeps dots: "reyesholdings.east-us-2.azure" → host is same
+        url = f"https://{account}.snowflakecomputing.com/api/v2/cortex/analyst/message"
+
+        # Build payload — prefer semantic_view when available, else send YAML inline
+        def _build_payload(question_text: str) -> dict[str, Any]:
+            if semantic_view:
+                return {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": question_text}],
+                        }
+                    ],
+                    "semantic_view": semantic_view,
+                }
+
+            model_path = SEMANTIC_MODELS_DIR / f"{semantic_model}.yaml"
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"Semantic model not found: {model_path}. "
+                    f"Available: {self.list_semantic_models()}"
+                )
+            with model_path.open() as f:
+                semantic_model_yaml = f.read()
+
+            return {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": question_text}],
+                    }
+                ],
+                "semantic_model": semantic_model_yaml,
+            }
+
+        headers = {
+            "Authorization": f'Snowflake Token="{token}"',
+            "Content-Type": "application/json",
+        }
+
+        def _execute_once(question_text: str) -> tuple[str, str, pd.DataFrame, list[str]]:
+            payload = _build_payload(question_text)
+            source = f"semantic_view={semantic_view}" if semantic_view else f"model={semantic_model}"
+            logger.info(
+                "Calling Cortex Analyst: %s question=%s",
+                source, question[:120],
+            )
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            if resp.status_code != 200:
+                # Extract Snowflake's error message from the response body
+                # before raising — raw raise_for_status() hides the real cause.
+                try:
+                    err_body = resp.json()
+                    sf_message = err_body.get("message", resp.text[:500])
+                except Exception:
+                    sf_message = resp.text[:500]
+                logger.error(
+                    "Cortex Analyst API error: HTTP %d — %s",
+                    resp.status_code, sf_message,
+                )
+                raise requests.exceptions.HTTPError(
+                    f"Cortex Analyst HTTP {resp.status_code}: {sf_message}",
+                    response=resp,
+                )
+            result = resp.json()
+
+            request_id = result.get("request_id", "unknown")
+            content_blocks = result.get("message", {}).get("content", [])
+            warnings_raw = result.get("warnings", [])
+            local_warnings = [w.get("message", str(w)) for w in warnings_raw]
+
+            generated_sql_local = ""
+            for block in content_blocks:
+                if block.get("type") == "sql":
+                    generated_sql_local = block.get("statement", "")
+                elif block.get("type") == "suggestions":
+                    suggestions = block.get("suggestions", [])
+                    local_warnings.append(
+                        f"Cortex Analyst returned suggestions instead of SQL. "
+                        f"Try one of: {suggestions}"
+                    )
+
+            if not generated_sql_local:
+                return "", request_id, pd.DataFrame(), local_warnings
+
+            sql_upper = generated_sql_local.upper()
+            has_limit = "LIMIT" in sql_upper.split("--")[0].rsplit("ORDER", 1)[-1] if "LIMIT" in sql_upper else False
+            if limit and not has_limit:
+                exec_sql_local = f"{generated_sql_local.rstrip().rstrip(';')}\nLIMIT {limit}"
+            else:
+                exec_sql_local = generated_sql_local.rstrip().rstrip(';')
+
+            logger.info("Executing Cortex-generated SQL (%d chars)", len(exec_sql_local))
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    f"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = {query_timeout_seconds}"
+                )
+                cursor.execute(exec_sql_local)
+                columns = [col[0].upper() for col in cursor.description]
+                rows = cursor.fetchall()
+                df_local = pd.DataFrame(rows, columns=columns)
+            finally:
+                cursor.close()
+
+            if limit and len(df_local) >= limit:
+                local_warnings.append(
+                    f"Result was capped at {limit:,} rows. The full result set may be larger. "
+                    f"Consider narrowing your question with a date range or category filter."
+                )
+                logger.warning("Result hit row limit (%d rows)", limit)
+
+            logger.info(
+                "Cortex Analyst returned %d rows, %d columns",
+                len(df_local), len(df_local.columns),
+            )
+            return generated_sql_local, request_id, df_local, local_warnings
+
+        generated_sql, request_id, df, warnings = _execute_once(effective_question)
+        if not generated_sql:
+            logger.warning("Cortex Analyst returned no SQL for question: %s", question)
+            return CortexAnalystResponse(
+                generated_sql="-- No SQL generated",
+                dataframe=pd.DataFrame(),
+                rows_returned=0,
+                semantic_model=semantic_model,
+                request_id=request_id,
+                warnings=warnings or ["No SQL statement returned by Cortex Analyst."],
+            )
+
+        # Delivery quality guard: if coverage is implausibly low, retry once with
+        # a stricter query pattern before returning data downstream.
+        if _is_delivery_related(question):
+            stats = _delivery_coverage_stats(df)
+            if stats is not None:
+                active, total, ratio = stats
+                if total > 0 and ratio < _MIN_DELIVERY_COVERAGE_RATIO:
+                    warning = (
+                        f"{_DELIVERY_COVERAGE_WARNING_PREFIX} observed={active}/{total} "
+                        f"ratio={ratio:.3f} threshold={_MIN_DELIVERY_COVERAGE_RATIO:.3f} "
+                        "action=retry_with_strict_delivery_prompt"
+                    )
+                    warnings.append(warning)
+                    logger.warning("%s", warning)
+
+                    retry_prompt = _delivery_retry_reframe(question)
+                    retry_sql, retry_request_id, retry_df, retry_warnings = _execute_once(retry_prompt)
+                    if retry_sql:
+                        retry_stats = _delivery_coverage_stats(retry_df)
+                        if retry_stats is not None:
+                            r_active, r_total, r_ratio = retry_stats
+                            if r_total > 0 and r_ratio > ratio:
+                                logger.info(
+                                    "Delivery coverage retry improved result: %d/%d (%.3f -> %.3f)",
+                                    r_active,
+                                    r_total,
+                                    ratio,
+                                    r_ratio,
+                                )
+                                generated_sql = retry_sql
+                                request_id = retry_request_id
+                                df = retry_df
+                                warnings.extend(retry_warnings)
+                                ratio = r_ratio
+                                active = r_active
+                                total = r_total
+
+                        final_warning = (
+                            f"{_DELIVERY_COVERAGE_WARNING_PREFIX} observed={active}/{total} "
+                            f"ratio={ratio:.3f} threshold={_MIN_DELIVERY_COVERAGE_RATIO:.3f} "
+                            "action=downstream_quality_gate"
+                        )
+                        warnings.append(final_warning)
+                        logger.warning("%s", final_warning)
+
+        # ---- Grain validation for analytical questions ----
+        if analytical and len(df) < _MIN_ANALYTICAL_ROWS and len(df) > 0:
+            logger.warning(
+                "Cortex returned only %d rows for an analytical question "
+                "(expected >= %d for statistical analysis). Data may be "
+                "over-aggregated. Consider using a verified query or "
+                "narrowing the question.",
+                len(df), _MIN_ANALYTICAL_ROWS,
+            )
+            warnings.append(
+                f"Over-aggregation detected: Cortex returned {len(df)} rows for "
+                f"an analytical question. Downstream statistical analysis "
+                f"(correlations, regressions) may be unreliable with this few "
+                f"observations. Expected >= {_MIN_ANALYTICAL_ROWS} rows at "
+                f"store × week grain."
+            )
+
+        if analytical and _is_tpo_target(semantic_model, semantic_view):
+            warnings.extend(_tpo_context_warnings(df))
+
+        return CortexAnalystResponse(
+            generated_sql=generated_sql,
+            dataframe=df,
+            rows_returned=len(df),
+            semantic_model=semantic_model,
+            request_id=request_id,
+            warnings=warnings,
         )
 
     def _mock_response(

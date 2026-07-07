@@ -208,6 +208,28 @@ uv run python -m src.main --question "What patterns are present this period?" \
 
 15-30 min wall time. **Confirm the user has approved spending the $10-15 before kicking this off — it is not your money.**
 
+### Recurring weekly runs with prior-run context
+
+For recurring prompts (same weekly question), include prior run output as bounded
+context so agents can compare trend direction and persistence:
+
+```bash
+# Auto-use latest completed run in runs/
+uv run python -m src.main --scheduled \
+  --prompt-config config/prompts/weekly-anomaly-scan.yaml \
+  --source cortex_analyst --domain walmart-opd --backend foundry-dev \
+  --use-latest-run-context
+
+# Or use a specific prior run id
+uv run python -m src.main --scheduled \
+  --prompt-config config/prompts/weekly-anomaly-scan.yaml \
+  --source cortex_analyst --domain walmart-opd --backend foundry-dev \
+  --prior-run-id 20260618T141448Z-483d87f3
+```
+
+Guardrail: prior-run context is reference only. Agents must recompute all numeric
+claims from current-run data; they must not copy forward prior claims.
+
 ### Replay just the Communication Agent (cheap iteration)
 
 ```bash

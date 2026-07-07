@@ -55,9 +55,13 @@ from src.orchestrator.schemas import (
     QuestionFramerPayload,
     TokenUsage,
     validate_payload,
+    _unwrap_envelope,
 )
 
 logger = logging.getLogger(__name__)
+
+_PROMPT_LOG_MAX_CHARS = 4_000
+_PAYLOAD_LOG_MAX_CHARS = 8_000
 
 # Agents whose failure should abort the entire pipeline (vs. skip-and-flag).
 # Rationale:
@@ -117,6 +121,7 @@ class PipelineExecutor:
         budget: BudgetTracker,
         lineage: LineageTracker,
         domain: str | None = None,
+        previous_run_context: dict[str, Any] | None = None,
     ) -> None:
         # `client` is the *primary* / Anthropic-native client. When per-agent
         # model config selects a non-Anthropic provider (e.g. `openai/gpt-5`),
@@ -129,6 +134,7 @@ class PipelineExecutor:
         self.budget = budget
         self.lineage = lineage
         self.domain = domain
+        self.previous_run_context = previous_run_context
         self._client_cache: dict[str, LLMClient] = {}
 
     def _client_for_model(self, model: str) -> LLMClient:
@@ -152,6 +158,7 @@ class PipelineExecutor:
         user_question: str,
         proactive_prompt: str | None = None,
         data_summary: dict[str, Any] | None = None,
+        previous_run_context: dict[str, Any] | None = None,
     ) -> QuestionFramerPayload:
         """Run the Question Framer alone to produce the pipeline brief.
 
@@ -174,6 +181,7 @@ class PipelineExecutor:
             user_question=user_question,
             proactive_prompt=proactive_prompt,
             data_summary=data_summary,
+            previous_run_context=previous_run_context or self.previous_run_context,
         )
         artifact = self._call_and_validate(
             agent=agent,
@@ -182,6 +190,27 @@ class PipelineExecutor:
             user_message=user_message_text,
         )
         return QuestionFramerPayload.model_validate(artifact["payload"])
+
+    def rerun_communication_agent(
+        self,
+        *,
+        upstream_artifacts: dict[str, dict[str, Any]],
+        dataset_file_id: str | None = None,
+        stage_index: int = 6,
+    ) -> StageResult:
+        """Run only the communication-agent from existing upstream artifacts.
+
+        Useful for iterative output-format tuning without re-running all analytical
+        stages. Expects prior stage artifacts (typically question-framer through
+        findings-validator).
+        """
+        return self._execute_stage(
+            stage_index=stage_index,
+            agent="communication-agent",
+            skills=[],
+            upstream_artifacts=upstream_artifacts,
+            dataset_file_id=dataset_file_id,
+        )
 
     # ---------- Main pipeline loop ----------
 
@@ -197,6 +226,17 @@ class PipelineExecutor:
         """
         run = PipelineRun(run_id=self.run_logger.run_id)
         run.run_caveats = list(getattr(self, "_pending_run_caveats", []))
+
+        planned_agents: list[str] = []
+        for stage in framer.pipeline_composition:
+            stages_to_run = stage.parallel if hasattr(stage, "parallel") else [stage]
+            planned_agents.extend([s.agent for s in stages_to_run])
+        self.run_logger.info(
+            "Pipeline agent plan",
+            stage_count=len(framer.pipeline_composition),
+            agents=planned_agents,
+            unique_agents=sorted(set(planned_agents)),
+        )
 
         try:
             for i, stage in enumerate(framer.pipeline_composition, start=1):
@@ -431,7 +471,7 @@ class PipelineExecutor:
                     agent=agent,
                     artifact=artifact,
                     status=artifact.get("status", "ok"),
-                    duration_ms=artifact.get("duration_ms", 0),
+                    duration_ms=stage_duration_ms,
                     skill_paths_loaded=prompt.sections_loaded,
                 )
             except BudgetExceeded:
@@ -482,6 +522,19 @@ class PipelineExecutor:
             if clarification is not None:
                 content_blocks.append(clarification)
             messages = [{"role": "user", "content": content_blocks}]
+            self.run_logger.info(
+                "Prompt submitted to agent",
+                stage_index=stage_index,
+                agent=agent,
+                attempt=attempt,
+                model=model,
+                prompt_sha256=prompt.prompt_sha256,
+                system_prompt_preview=self._truncate_text(prompt.system_prompt, _PROMPT_LOG_MAX_CHARS),
+                user_message_preview=self._truncate_text(
+                    self._content_blocks_to_text(content_blocks),
+                    _PROMPT_LOG_MAX_CHARS,
+                ),
+            )
             t0 = time.perf_counter()
             # Structured-output enforcement: pass the agent's artifact schema as
             # an Anthropic tool. Claude is expected to emit the final artifact
@@ -534,6 +587,10 @@ class PipelineExecutor:
                 clarification = {"type": "text", "text": self._clarification_for(agent, last_error)}
                 continue
 
+            # Store the unwrapped payload — _unwrap_envelope returns the clean
+            # dict without the wrapper key, but doesn't mutate the original.
+            parsed = _unwrap_envelope(parsed)
+
             artifact = {
                 "schema_version": "1.0",
                 "agent": agent,
@@ -558,7 +615,18 @@ class PipelineExecutor:
                     "agent_block": prompt.agent_block_sha256,
                 },
             }
-            self.run_logger.write_artifact(stage_index, agent, artifact)
+            artifact_path = self.run_logger.write_artifact(stage_index, agent, artifact)
+            self.run_logger.info(
+                "Stage output persisted",
+                stage_index=stage_index,
+                agent=agent,
+                artifact_path=str(artifact_path),
+                payload_keys=list(parsed.keys()),
+                payload_preview=self._truncate_text(
+                    json.dumps(parsed, default=str),
+                    _PAYLOAD_LOG_MAX_CHARS,
+                ),
+            )
             return artifact
 
         raise RuntimeError(f"Agent {agent} failed after {attempt} attempt(s): {last_error}")
@@ -634,6 +702,27 @@ class PipelineExecutor:
             f"No prose outside the JSON object."
         )
 
+    @staticmethod
+    def _content_blocks_to_text(blocks: list[dict[str, Any]]) -> str:
+        """Render message content blocks to plain text for structured logging."""
+        rendered: list[str] = []
+        for block in blocks:
+            block_type = block.get("type")
+            if block_type == "text":
+                rendered.append(str(block.get("text", "")))
+            elif block_type == "container_upload":
+                rendered.append(f"[container_upload file_id={block.get('file_id', '')}]")
+            else:
+                rendered.append(json.dumps(block, default=str))
+        return "\n\n".join(rendered)
+
+    @staticmethod
+    def _truncate_text(text: str, max_chars: int) -> str:
+        """Bound long fields so run logs stay parseable and affordable."""
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}... [truncated {len(text) - max_chars} chars]"
+
     def _record_missing_context(self, prompt: AssembledPrompt) -> None:
         msg = (
             f"No domain context document was found for '{prompt.domain_attempted}'. "
@@ -657,12 +746,21 @@ class PipelineExecutor:
         user_question: str,
         proactive_prompt: str | None,
         data_summary: dict[str, Any] | None,
+        previous_run_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         parts: list[str] = []
         if proactive_prompt:
             parts.append(f"# Scheduled prompt\n{proactive_prompt}")
         if user_question:
             parts.append(f"# User question\n{user_question}")
+        if previous_run_context:
+            parts.append(
+                "# Prior run context (for continuity, not copy-forward)\n"
+                "Use this only to compare trends, validate whether issues persist, "
+                "and avoid contradictory recommendations. Recompute all claims from "
+                "the current run's data.\n"
+                + json.dumps(previous_run_context, indent=2, default=str)
+            )
         if data_summary:
             parts.append(
                 "# Available data (summary — actual data lives in code execution sandbox)\n"
@@ -720,6 +818,16 @@ class PipelineExecutor:
                 name: art.get("payload", {}) for name, art in upstream_artifacts.items()
             }
             parts.append("```json\n" + json.dumps(payloads, indent=2, default=str) + "\n```")
+        if self.previous_run_context:
+            parts.append(
+                "# Prior run context (trend continuity)\n"
+                "This is reference context from a previous run. Use it to compare trend direction "
+                "and persistence, but do not reuse prior numeric claims without recomputing from "
+                "current data.\n"
+                "```json\n"
+                + json.dumps(self.previous_run_context, indent=2, default=str)
+                + "\n```"
+            )
         parts.append(
             "# Your task\nProduce your output as a single JSON object matching the schema "
             "specified in your role. No prose outside the JSON. Use the code_execution "

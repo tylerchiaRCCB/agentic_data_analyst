@@ -7,6 +7,22 @@ A good action card is **specific, owned, time-bounded, and counter-metric-aware.
 
 The card must be **executive-readable** — not analyst-readable. Senior leaders don't read statistical notation; they read business consequence. Statistical methodology belongs in a methodology footer or a `<details>` block, never in the headline or body.
 
+**BREVITY RULES:**
+- Each card body (alert through caveats, excluding `<details>`) must be **under 400 words**.
+- "Why this matters" = **2-3 sentences max**. One quantified business consequence.
+- "Root cause" = **2-3 sentences max**. State what's known, what's not.
+- "Recommended action" = **2-3 sentences max**. Specific and executable.
+- Caveats = **maximum 3 bullets**. Consolidate related caveats into one.
+- If you can't say it in 3 sentences, the finding needs tightening, not more words.
+- **COMPRESS, DON'T DISCARD:** Any caveats, supporting evidence, secondary analysis, or extended context beyond these limits goes into the card's `<details>` Methodology block. Nothing is lost — it moves from the executive layer to the analyst layer.
+
+**PLAIN-LANGUAGE RULES (strict):**
+- Write for a non-analyst business reader.
+- Do not use test names, statistical notation, or model terms in the card body.
+- Prefer common words: "moved together" over "correlated", "clear change" over "structural break".
+- Keep each sentence short and direct. Prefer one idea per sentence.
+- Start recommended action with a verb ("Call", "Pause", "Launch", "Audit", "Confirm").
+
 ## Card structure — rendered markdown, NOT a code-fenced block
 
 Each action card is rendered as native markdown (headers, bold, tables, callouts) so that:
@@ -23,13 +39,13 @@ Each action card is rendered as native markdown (headers, bold, tables, callouts
 
 > **<one-sentence ALERT in plain language, with the biggest number bolded>**
 
-**Confidence:** A | B | C
-
 **Why this matters.** <One short paragraph, 2–3 sentences, plain English. Translate the analytical finding into business consequence. Quantify in business units (cases, dollars, %, accounts affected) — never raw statistical units.>
 
 **Root cause.** <One short paragraph, 2–3 sentences. Use causation/correlation language calibrated to the investigator's `causation_vs_correlation` flag. Plain English. No p-values, no test names, no statistical notation here — those live in the Methodology footer.>
 
 **Recommended action.** <One short paragraph. Specific, executable, time-bounded. No "monitor" / "investigate" / "consider" alone.>
+
+**Do this now.** <One sentence that a manager can forward as-is to the owner.>
 
 | | |
 |---|---|
@@ -72,8 +88,13 @@ One sentence in a markdown blockquote (`> **<text>**`). Names the entity, the me
 - **Bad:** *"There may be an issue with Account 47 that warrants investigation."* — vague, no number.
 - **Bad:** *"A003/SKU003 instock_rate of 0.6625 vs. peer median 0.9275 (modified z = −24.46, MW U=0, p=0.0008)."* — over-technical for a headline; the test names and notation belong in the Methodology footer.
 
-### CONFIDENCE — A, B, or C
-Taken directly from the Validator's `grade` field. **Grades D and F never render.** The recipient sees the grade alongside the language calibrated to it (see [confidence-language.md](confidence-language.md)).
+Plain-language check before finalize:
+- Would a district manager understand this without analyst support?
+- Could the Owner forward the "Do this now" line directly to a team lead?
+- If not, rewrite.
+
+### CONFIDENCE HANDLING — internal only
+Taken from the Validator's `grade` field to calibrate wording and action strength. **Grades D and F never render.** Do not print an explicit `Confidence:` line in recipient-facing markdown.
 
 ### WHY THIS MATTERS — business framing in plain English
 Connects the analytical finding to a business consequence. Why should the recipient care? Quantify in **business units** (cases, dollars, accounts affected, % of business at risk) — **never raw statistical units**.
@@ -95,6 +116,11 @@ If the Root Cause Investigator returned `primary_root_cause: null` (no confident
 
 ### RECOMMENDED ACTION — specific, executable
 Bound by [close-the-loop.md](../universal/close-the-loop.md). Names the action, the contact / target if applicable, the subject. Never *"investigate further,"* *"monitor,"* *"consider."*
+
+Required pattern for readability:
+- Sentence 1: exact action and owner.
+- Sentence 2: when it must be done.
+- Sentence 3: what result means success/failure.
 
 ### OWNER — role + named individual where available
 A role (account manager, supply planner, plant manager, trade finance partner) at minimum. The domain context document's stakeholder map may provide a named individual; if so, include them. If the system does not know the named owner, surface the gap: *"Owner role: account manager; specific assignee to be filled by district manager."*
@@ -127,7 +153,7 @@ A short note specifying the chart type and what it would show. See [visualizatio
 
 ## When the Validator's output forces a downgrade
 
-Cards rendered at grade B or C must explicitly carry the grade in the CONFIDENCE field and use the corresponding language register (see [confidence-language.md](confidence-language.md)). A grade-C card frames the finding as preliminary — *"Initial signal suggests..."* — and explicitly notes what further evidence would raise confidence. The recipient never sees a grade-C card written in grade-A language.
+Cards rendered at grade B or C must use the corresponding language register (see [confidence-language.md](confidence-language.md)). A grade-C card frames the finding as preliminary — *"Initial signal suggests..."* — and explicitly notes what further evidence would raise confidence. The recipient should not see an explicit letter grade label.
 
 ## What does NOT belong on an action card
 
