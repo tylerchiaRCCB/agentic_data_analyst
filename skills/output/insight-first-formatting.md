@@ -11,15 +11,15 @@ Before any cards or descriptive summary, the rendered output MUST begin with an 
 
 ```markdown
 ## Executive Summary
-- **<Card 1 in one line — entity, metric, business consequence>** (Grade A)
-- **<Card 2 in one line>** (Grade B)
+- **<Card 1 in one line — entity, metric, business consequence>**
+- **<Card 2 in one line>**
 - Network performance otherwise <stable / mixed / soft>.
 ```
 
 Rules:
 - Maximum 5 bullets total. If more than 4 cards exist, group the lower-grade ones ("3 grade-C structural observations — see below").
 - Each bullet is **one line**. If a card needs more than one line to summarize, the card itself is too dense — tighten the card's headline first.
-- Confidence grade in parentheses at the end of each bullet.
+- Do not append grade letters in parentheses.
 - The third bullet (or last bullet, if only 2 cards) summarizes the descriptive-summary state of the rest of the network in 5 words or fewer.
 - Executive Summary is for executives who will read **only this section**. Make it count.
 

@@ -580,11 +580,23 @@ tables:
   # =========================================================================
   - name: delivery_stops
     description: >
-      RCCB delivery stop detail fact table. Contains actual delivery quantities
-      at the customer × product × date grain. Join to store_customer via
-      CUSTOMER_SID and to product via PRODUCT_SID to correlate delivery
-      execution with OPD in-stock performance. Higher delivery frequency and
-      volume may correlate with better FTPR.
+      RCCB delivery stop detail fact table (F_DELIVERY_STOP_DTL_V). Contains
+      actual delivery quantities at the customer × product × date grain.
+
+      ⚠️  CUSTOMER_SID JOIN COVERAGE WARNING: Joining this table to
+      V_STORE_CUSTOMER via CUSTOMER_SID only resolves ~73 of 623 OPD stores
+      (12%). This is because F_DELIVERY_STOP_DTL_V stores historical
+      CUSTOMER_SIDs that do not match the current-account SIDs in
+      V_STORE_CUSTOMER.
+
+      For DELIVERY ACTIVITY (is delivery happening at a store?), use the
+      merch_stops table (F_STOP) filtered to ROLE = 'DC' instead — that
+      joins correctly via CUSTOMER_SID and covers 592–608 of 623 stores.
+      See the verified queries delivery_volume_vs_ftpr_by_store_week and
+      store_ftpr_with_delivery_and_dc for the correct pattern.
+
+      DELIVERED_QTY and ORDERED_QTY from this table are only usable for
+      the ~73 stores whose CUSTOMER_SID happens to match.
     base_table:
       database: CCB_PRD
       schema: DM
@@ -778,6 +790,73 @@ tables:
           - "time in store"
 
   # =========================================================================
+  # FACT: GreenMile Delivery Activity — DC driver stops at store level
+  # =========================================================================
+  - name: delivery_activity
+    description: >
+      GreenMile DC driver stop activity at STORE_NBR grain. Backed by
+      V_GREENMILE_DELIVERY, which joins F_STOP (ROLE='DC') to D_CUSTOMER_V via
+      CUSTOMER_ID (natural key) and extracts store number via regex on
+      CUSTOMER_DESC. This join path resolves 608/623 OPD stores (97.6%).
+
+      Join to walmart_opd_daily on STORE_NBR. This table is the correct source
+      for delivery activity analysis — do NOT use delivery_stops (F_DELIVERY_STOP_DTL_V)
+      for delivery presence, as its CUSTOMER_SID join only resolves 73/623 stores.
+    base_table:
+      database: CCB_DATASCIENCE_DEV
+      schema: WALMART_OPD
+      table: V_GREENMILE_DELIVERY
+
+    dimensions:
+      - name: store_nbr
+        description: "Walmart store number — join key to OPD data."
+        expr: STORE_NBR
+        data_type: NUMBER
+
+      - name: distribution_center_desc
+        description: "RCCB distribution center serving this store."
+        expr: DISTRIBUTION_CENTER_DESC
+        data_type: VARCHAR
+        synonyms:
+          - "dc"
+          - "distribution center"
+
+    time_dimensions:
+      - name: route_date
+        description: "DC driver route date (date of delivery stop)."
+        expr: ROUTE_DATE
+        data_type: DATE
+        synonyms:
+          - "delivery date"
+          - "stop date"
+
+      - name: actual_arrival_date
+        description: "Actual arrival timestamp at the store."
+        expr: ACTUAL_ARRIVAL_DATE
+        data_type: TIMESTAMP
+
+      - name: actual_departure_date
+        description: "Actual departure timestamp from the store."
+        expr: ACTUAL_DEPARTURE_DATE
+        data_type: TIMESTAMP
+
+    metrics:
+      - name: delivery_stop_count
+        description: "Number of DC driver delivery stops at this store."
+        expr: COUNT(*)
+        synonyms:
+          - "delivery count"
+          - "delivery frequency"
+          - "number of deliveries"
+
+      - name: avg_delivery_duration_mins
+        description: "Average delivery stop duration in minutes."
+        expr: AVG(DATEDIFF('minute', ACTUAL_ARRIVAL_DATE, ACTUAL_DEPARTURE_DATE))
+        synonyms:
+          - "delivery time"
+          - "time at store"
+
+  # =========================================================================
   # DIMENSION: Fiscal Calendar
   # =========================================================================
   - name: fiscal_calendar
@@ -849,6 +928,15 @@ relationships:
     relationship_columns:
       - left_column: CUSTOMER_SID
         right_column: CUSTOMER_SID
+
+  # Delivery activity → Store/Customer (STORE_NBR is primary key of store_customer)
+  # Gives Cortex the 608/623-store delivery coverage via V_GREENMILE_DELIVERY.
+  - name: delivery_activity_to_store_customer
+    left_table: delivery_activity
+    right_table: store_customer
+    relationship_columns:
+      - left_column: STORE_NBR
+        right_column: STORE_NBR
 
   # Delivery → Product (PRODUCT_SID is unique in V_PRODUCT)
   - name: delivery_to_product
@@ -1039,49 +1127,70 @@ verified_queries:
       GROUP BY SC.DISTRIBUTION_CENTER_DESC
       ORDER BY nil_pick_rate DESC
 
-  # --- Cross-table: OPD × Delivery (via store_customer → delivery) ---
+  # --- Cross-table: OPD × Delivery (via GreenMile F_STOP ROLE='DC') ---
   # NOTE: Return store × week grain with FTPR numerator/denominator AND delivery
   # columns side by side. Do NOT pre-aggregate into buckets or summaries.
   #
-  # DELIVERY COVERAGE (verified from F_DELIVERY_STOP_DTL_V, Jan 2025 – Apr 2026):
-  #   563 of 623 OPD stores (90.4%) have ACTIVE RCCB delivery (DELIVERED_QTY > 0
-  #   in at least one stop). 43 stores (6.9%) have a CUSTOMER_SID that joins but
-  #   have NO rows in F_DELIVERY_STOP_DTL_V — legitimate no-delivery stores.
-  #   17 stores (2.7%) have no CUSTOMER_SID at all (bridge miss).
-  #   If a pipeline run reports far fewer delivery-active stores, that is a SQL
-  #   aggregation bug — not a true coverage gap. See delivery_coverage_diagnostic.sql.
+  # DELIVERY COVERAGE (verified June 2026, direct Snowflake test):
+  #   608 of 623 OPD stores (97.6%) have RCCB delivery stops in GreenMile
+  #   (F_STOP ROLE='DC'). 15 stores have no match (bridge or route gap).
+  #   Source: CCB_PRD.GREEN_MILE_CORE.F_STOP joined to D_CUSTOMER_V via
+  #   CUSTOMER_ID, store extracted via REGEXP_SUBSTR on CUSTOMER_DESC.
+  #
+  #   ⚠️  DO NOT JOIN via F_DELIVERY_STOP_DTL_V.CUSTOMER_SID — that path only
+  #   resolves 73/623 stores (12%) due to historical SID mismatch. Always use
+  #   the F_STOP ROLE='DC' + D_CUSTOMER_V.CUSTOMER_ID pattern shown below.
   - name: delivery_volume_vs_ftpr_by_store_week
     question: "Is there a relationship between delivery volume and FTPR?"
     sql: |
-      SELECT
-        sc.STORE_NBR,
-        sc.DISTRIBUTION_CENTER_DESC AS dc,
-        DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) AS week_start,
-        SUM(opd.FTPR_NMRTR) AS ftpr_nmrtr,
-        SUM(opd.FTPR_DNMNTR) AS ftpr_dnmntr,
-        SUM(opd.FTPR_NMRTR) / NULLIF(SUM(opd.FTPR_DNMNTR), 0) AS ftpr_rate,
-        SUM(opd.NIL_PICK_QTY) AS nil_pick_qty,
-        MAX(COALESCE(del.delivered_qty, 0)) AS delivered_qty,
-        MAX(COALESCE(del.delivery_stops, 0)) AS delivery_stops
-      FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA opd
-      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER sc
-        ON opd.STORE_NBR = sc.STORE_NBR
-      LEFT JOIN (
+      WITH del_weekly AS (
         SELECT
-          d.CUSTOMER_SID,
-          DATE_TRUNC('WEEK', TRY_TO_DATE(TO_CHAR(d.DELIVERY_DATE_SID), 'YYYYMMDD')) AS week_start,
-          SUM(d.DELIVERED_QTY) AS delivered_qty,
-          COUNT(*) AS delivery_stops
-        FROM CCB_PRD.DM.F_DELIVERY_STOP_DTL_V d
-        WHERE d.DELIVERY_DATE_SID >= 20250101
-        GROUP BY d.CUSTOMER_SID, DATE_TRUNC('WEEK', TRY_TO_DATE(TO_CHAR(d.DELIVERY_DATE_SID), 'YYYYMMDD'))
-      ) del ON sc.CUSTOMER_SID = del.CUSTOMER_SID
-        AND DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) = del.week_start
-      WHERE opd.DATE_SID >= '20250101'
-        AND opd.STORE_NBR <> 9999
-      GROUP BY sc.STORE_NBR, sc.DISTRIBUTION_CENTER_DESC,
-               DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD'))
-      ORDER BY sc.STORE_NBR, week_start
+          REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+          DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE))                             AS week_start,
+          COUNT(*)                                                             AS delivery_stop_count,
+          MAX(GM.ACTUAL_DEPARTURE_DATE)                                       AS last_del_departure
+        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+        JOIN CCB_PRD.DM.D_CUSTOMER_V C
+            ON GM.CUSTOMER_ID = C.CUSTOMER_ID
+            AND C.CURRENT_IND = 'Y'
+            AND C.ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+            AND C.BUSINESS_TYPE_DESC = 'DSD'
+            AND REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+          AND GM.ROLE = 'DC'
+          AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+        GROUP BY 1, 2
+      ),
+      opd_weekly AS (
+        SELECT
+          STORE_NBR,
+          DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start,
+          SUM(FTPR_NMRTR)   AS ftpr_nmrtr,
+          SUM(FTPR_DNMNTR)  AS ftpr_dnmntr,
+          SUM(NIL_PICK_QTY) AS nil_pick_qty
+        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA
+        WHERE DATE_SID >= '20250101' AND STORE_NBR <> 9999
+        GROUP BY 1, 2
+      ),
+      sc AS (
+        SELECT STORE_NBR, DISTRIBUTION_CENTER_DESC
+        FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER
+      )
+      SELECT
+        opd.STORE_NBR,
+        sc.DISTRIBUTION_CENTER_DESC                                         AS dc,
+        opd.week_start,
+        opd.ftpr_nmrtr,
+        opd.ftpr_dnmntr,
+        opd.ftpr_nmrtr / NULLIF(opd.ftpr_dnmntr, 0)                        AS ftpr_rate,
+        opd.nil_pick_qty,
+        COALESCE(del.delivery_stop_count, 0)                                AS delivery_stop_count,
+        CASE WHEN del.store_nbr IS NOT NULL THEN 1 ELSE 0 END               AS is_delivery_active_week
+      FROM opd_weekly opd
+      LEFT JOIN sc ON opd.STORE_NBR = sc.STORE_NBR
+      LEFT JOIN del_weekly del
+        ON opd.STORE_NBR = del.store_nbr AND opd.week_start = del.week_start
+      ORDER BY opd.STORE_NBR, opd.week_start
     use_as_onboarding_question: true
 
   # --- Cross-table: OPD × Merch (via store_customer → merch_stops) ---
@@ -1164,36 +1273,51 @@ verified_queries:
   # --- Cross-table: OPD × DC × Delivery (full chain) ---
   # NOTE: Return store × week grain so downstream tools can analyze
   # within-DC variance over time, not just DC-level averages.
-  # See delivery coverage note above: 563 of 623 stores have active delivery.
+  # Delivery coverage: 608/623 stores (97.6%) via F_STOP ROLE='DC' pattern.
   - name: store_ftpr_with_delivery_and_dc
     question: "How does delivery volume per DC relate to in-stock performance?"
     sql: |
-      SELECT
-        sc.STORE_NBR,
-        sc.DISTRIBUTION_CENTER_DESC AS dc,
-        DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) AS week_start,
-        SUM(opd.FTPR_NMRTR) AS ftpr_nmrtr,
-        SUM(opd.FTPR_DNMNTR) AS ftpr_dnmntr,
-        SUM(opd.FTPR_NMRTR) / NULLIF(SUM(opd.FTPR_DNMNTR), 0) AS ftpr_rate,
-        SUM(opd.NIL_PICK_QTY) AS nil_pick_qty,
-        MAX(COALESCE(del.delivered_qty, 0)) AS delivered_qty,
-        MAX(COALESCE(del.delivery_stops, 0)) AS delivery_stops
-      FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA opd
-      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER sc
-        ON opd.STORE_NBR = sc.STORE_NBR
-      LEFT JOIN (
+      WITH del_weekly AS (
         SELECT
-          d.CUSTOMER_SID,
-          DATE_TRUNC('WEEK', TRY_TO_DATE(TO_CHAR(d.DELIVERY_DATE_SID), 'YYYYMMDD')) AS week_start,
-          SUM(d.DELIVERED_QTY) AS delivered_qty,
-          COUNT(*) AS delivery_stops
-        FROM CCB_PRD.DM.F_DELIVERY_STOP_DTL_V d
-        WHERE d.DELIVERY_DATE_SID >= 20250101
-        GROUP BY d.CUSTOMER_SID, DATE_TRUNC('WEEK', TRY_TO_DATE(TO_CHAR(d.DELIVERY_DATE_SID), 'YYYYMMDD'))
-      ) del ON sc.CUSTOMER_SID = del.CUSTOMER_SID
-        AND DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) = del.week_start
-      WHERE opd.DATE_SID >= '20250101'
-        AND opd.STORE_NBR <> 9999
-      GROUP BY sc.STORE_NBR, sc.DISTRIBUTION_CENTER_DESC,
-               DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD'))
-      ORDER BY sc.STORE_NBR, week_start
+          REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+          DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE))                             AS week_start,
+          COUNT(*)                                                             AS delivery_stop_count
+        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+        JOIN CCB_PRD.DM.D_CUSTOMER_V C
+            ON GM.CUSTOMER_ID = C.CUSTOMER_ID
+            AND C.CURRENT_IND = 'Y'
+            AND C.ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+            AND C.BUSINESS_TYPE_DESC = 'DSD'
+            AND REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+          AND GM.ROLE = 'DC'
+          AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+        GROUP BY 1, 2
+      ),
+      opd_weekly AS (
+        SELECT
+          STORE_NBR,
+          DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start,
+          SUM(FTPR_NMRTR)   AS ftpr_nmrtr,
+          SUM(FTPR_DNMNTR)  AS ftpr_dnmntr,
+          SUM(NIL_PICK_QTY) AS nil_pick_qty
+        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA
+        WHERE DATE_SID >= '20250101' AND STORE_NBR <> 9999
+        GROUP BY 1, 2
+      )
+      SELECT
+        opd.STORE_NBR,
+        sc.DISTRIBUTION_CENTER_DESC                              AS dc,
+        opd.week_start,
+        opd.ftpr_nmrtr,
+        opd.ftpr_dnmntr,
+        opd.ftpr_nmrtr / NULLIF(opd.ftpr_dnmntr, 0)             AS ftpr_rate,
+        opd.nil_pick_qty,
+        COALESCE(del.delivery_stop_count, 0)                     AS delivery_stop_count,
+        CASE WHEN del.store_nbr IS NOT NULL THEN 1 ELSE 0 END    AS is_delivery_active_week
+      FROM opd_weekly opd
+      LEFT JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER sc
+          ON opd.STORE_NBR = sc.STORE_NBR
+      LEFT JOIN del_weekly del
+          ON opd.STORE_NBR = del.store_nbr AND opd.week_start = del.week_start
+      ORDER BY opd.STORE_NBR, opd.week_start

@@ -5,35 +5,61 @@
 -- using SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML.
 --
 -- Prerequisites:
---   1. Run scripts/create_bridge_views.sql first (creates V_STORE_CUSTOMER and V_UPC_PRODUCT)
+--   1. Run scripts/create_bridge_views.sql first (creates V_STORE_CUSTOMER,
+--      V_UPC_PRODUCT, V_PRODUCT, V_WALMART_OPD bridge views).
 --   2. Ensure role CCB_DATASCIENCE_SYSADMIN_SNOWFLAKE has access to:
 --      - CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA
 --      - CCB_DATASCIENCE_DEV.WALMART_OPD schema (for bridge views)
 --      - CCB_PRD.GREEN_MILE_CORE.F_STOP
---      - CCB_PRD.DM.F_DELIVERY_STOP_DTL_V
+--      - CCB_PRD.DM.D_CUSTOMER_V
 --      - CCB_PRD.DM.D_FISCAL_CALENDAR_DATE_COKE_CY_PY_V
 --
+-- NOTE: Delivery data now sourced from F_STOP ROLE='DC' (not F_DELIVERY_STOP_DTL_V).
+--   F_STOP ROLE='DC' covers 608/623 OPD stores (97.6%) vs 73/623 (12%) from
+--   F_DELIVERY_STOP_DTL_V due to CUSTOMER_SID historical mismatch. See verified
+--   queries in the YAML for the correct join pattern.
+--
 -- Usage: Execute in Snowsight with role CCB_DATASCIENCE_SYSADMIN_SNOWFLAKE
+-- Last updated: 2026-06-26 (delivery join fix)
 -- =============================================================================
 
 USE ROLE CCB_DATASCIENCE_SYSADMIN_SNOWFLAKE;
-USE WAREHOUSE CCB_DATASCIENCE_WH;
 USE DATABASE CCB_DATASCIENCE_DEV;
 USE SCHEMA WALMART_OPD;
 
 -- Drop existing semantic view if it exists
-DROP  VIEW IF EXISTS WALMART_OPD;
+DROP SEMANTIC VIEW IF EXISTS CCB_DATASCIENCE_DEV.WALMART_OPD.WALMART_OPD;
 
 -- Create the semantic view from YAML specification
 CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
   'CCB_DATASCIENCE_DEV.WALMART_OPD',
-  $$
-name: walmart_opd
+  $$name: walmart_opd
 description: >
   Walmart Online, Pickup, and Delivery (OPD) in-stock execution data enriched
   with RCCB internal product, customer, distribution center, delivery execution,
   and merchandising data. Enables analysis of in-stock performance drivers across
   the RCCB supply chain.
+
+  IMPORTANT — data quality rule for generated SQL:
+  - ALWAYS JOIN to upc_product (ON CORE_UPC_10) when computing nil pick rate,
+    FTPR, or any KPI aggregation on the walmart_opd_daily table. The OPD table
+    contains a small number of unmatched UPCs with corrupt nil pick values that
+    will inflate aggregations if not filtered out. The upc_product inner join
+    acts as an RCCB product filter and must be included in every query that
+    aggregates KPI numerators or denominators.
+
+  IMPORTANT — granularity rules for generated SQL:
+  - Return data at the STORE × WEEK level (one row per store per week) for
+    cross-table queries involving delivery, merch, or time-series analysis.
+    This preserves temporal variation so downstream statistical tools can
+    compute correlations, lagged effects, and trend analysis.
+  - For simple single-table questions (e.g., "FTPR by category"), GROUP BY
+    the requested dimension without forcing store × week.
+  - Do NOT bucket, bin, or pre-aggregate stores into groups. Do NOT compute
+    final statistics like correlations or regressions — return the raw rows
+    so downstream tools handle that.
+  - Always include SUM(FTPR_NMRTR) and SUM(FTPR_DNMNTR) as separate columns
+    alongside the computed ftpr_rate so downstream tools can re-aggregate.
 
 tables:
   # =========================================================================
@@ -62,20 +88,28 @@ tables:
           - "location"
 
       - name: brand
-        description: "Product brand name (e.g., Coca-Cola, Monster, Dasani, Topo Chico)."
+        description: >
+          Product brand name. Values are mixed case — some all-caps (MONSTER,
+          REIGN, BANG, JAVA), some title case (Coke, Sprite, Gold Peak).
+          Always use ILIKE for brand filtering to handle case variations.
         expr: BRAND
         data_type: VARCHAR
         synonyms:
           - "brand name"
           - "product brand"
         sample_values:
-          - "Coca-Cola"
-          - "Monster"
-          - "Dasani"
-          - "Powerade"
+          - "Coke"
+          - "MONSTER"
+          - "Sprite"
+          - "Powerade Base"
           - "Gold Peak"
-          - "Topo Chico"
-          - "smartwater"
+          - "REIGN"
+          - "Smartwater"
+          - "Bodyarmor Base"
+          - "BANG"
+          - "JAVA"
+          - "Diet Coke"
+          - "Minute Maid Sparkling"
 
       - name: category
         description: >
@@ -157,8 +191,9 @@ tables:
 
       - name: ko_attribution_flag
         description: >
-          KO (RCCB) attribution flag for nil picks. '1' means the nil pick is
-          attributed to RCCB (supplier-side) — e.g., delivery miss, DC out-of-stock.
+          Nil pick flag labeled 'KO' in the source data. '0' or '1' enum.
+          Exact definition unconfirmed — likely an attribution category but
+          verify meaning with the Walmart OPD data owner before interpreting.
         expr: TY_NIL_PICK_KO_FLAG
         data_type: VARCHAR
         synonyms:
@@ -172,9 +207,9 @@ tables:
 
       - name: wm_attribution_flag
         description: >
-          Walmart attribution flag for nil picks. '1' means the nil pick is
-          attributed to Walmart (retailer-side) — e.g., shelf not stocked,
-          planogram issue, store-ops failure.
+          Nil pick flag labeled 'WM' in the source data. '0' or '1' enum.
+          Exact definition unconfirmed — likely an attribution category but
+          verify meaning with the Walmart OPD data owner before interpreting.
         expr: TY_NIL_PICK_WM_FLAG
         data_type: VARCHAR
         synonyms:
@@ -188,9 +223,9 @@ tables:
 
       - name: phantom_inventory_flag
         description: >
-          Phantom inventory flag. '1' means the nil pick may be due to phantom
-          inventory — the system shows the item in stock but it cannot be found
-          on the shelf. Indicates inventory record inaccuracy.
+          Nil pick flag labeled 'PI' in the source data. '0' or '1' enum.
+          Exact definition unconfirmed — 'PI' may refer to phantom inventory
+          but verify meaning with the Walmart OPD data owner before interpreting.
         expr: TY_NIL_PICK_POSSIBLE_PI
         data_type: VARCHAR
         synonyms:
@@ -217,19 +252,21 @@ tables:
           - "pick date"
 
     facts:
-      - name: ftpr_numerator
+      - name: ftpr_nmrtr
         description: "First Time Pick Rate numerator — number of successful first-time picks."
         expr: FTPR_NMRTR
         data_type: NUMBER
         synonyms:
+          - "ftpr numerator"
           - "successful picks"
           - "first time picks"
 
-      - name: ftpr_denominator
+      - name: ftpr_dnmntr
         description: "First Time Pick Rate denominator — total pick attempts."
         expr: FTPR_DNMNTR
         data_type: NUMBER
         synonyms:
+          - "ftpr denominator"
           - "total picks"
           - "pick attempts"
           - "total orders"
@@ -260,39 +297,39 @@ tables:
         synonyms:
           - "pre substitution"
 
-      - name: presub_rate_numerator
+      - name: presub_rate_nmrtr
         description: "Pre-substitution rate numerator."
         expr: PRESUB_RATE_NMRTR
         data_type: NUMBER
 
-      - name: presub_rate_denominator
+      - name: presub_rate_dnmntr
         description: "Pre-substitution rate denominator."
         expr: PRESUB_RATE_DNMNTR
         data_type: NUMBER
 
-      - name: postsub_rate_numerator
+      - name: postsub_rate_nmrtr
         description: "Post-substitution rate numerator — picker-initiated substitutions after nil pick."
         expr: POSTSUB_RATE_NMRTR
         data_type: NUMBER
 
-      - name: postsub_rate_denominator
+      - name: postsub_rate_dnmntr
         description: "Post-substitution rate denominator."
         expr: POSTSUB_RATE_DNMNTR
         data_type: NUMBER
 
-      - name: scheduled_nil_pick_qty
+      - name: schdl_nil_pick_qty
         description: "Scheduled nil-pick quantity — nil picks on items with scheduled delivery."
         expr: SCHDL_NIL_PICK_QTY
         data_type: NUMBER
         synonyms:
           - "scheduled nil picks"
 
-      - name: scheduled_nil_pick_rate_numerator
+      - name: schdl_nil_pick_rate_nmrtr
         description: "Scheduled nil-pick rate numerator."
         expr: SCHDL_NIL_PICK_RATE_NMRTR
         data_type: NUMBER
 
-      - name: scheduled_nil_pick_rate_denominator
+      - name: schdl_nil_pick_rate_dnmntr
         description: "Scheduled nil-pick rate denominator."
         expr: SCHDL_NIL_PICK_RATE_DNMNTR
         data_type: NUMBER
@@ -304,12 +341,12 @@ tables:
         synonyms:
           - "unscheduled nil picks"
 
-      - name: unscheduled_nil_pick_rate_numerator
+      - name: unschdl_nil_pick_rate_nmtr
         description: "Unscheduled nil-pick rate numerator."
         expr: UNSCHDL_NIL_PICK_RATE_NMTR
         data_type: NUMBER
 
-      - name: unscheduled_nil_pick_rate_denominator
+      - name: unschdl_nil_pick_rate_dnmtr
         description: "Unscheduled nil-pick rate denominator."
         expr: UNSCHDL_NIL_PICK_RATE_DNMTR
         data_type: NUMBER
@@ -338,7 +375,7 @@ tables:
           - "miss rate"
 
       - name: ko_attribution_rate
-        description: "Share of nil picks attributed to RCCB (KO)."
+        description: "Share of nil picks where TY_NIL_PICK_KO_FLAG = '1'. Definition unconfirmed — verify with data owner."
         expr: SUM(CASE WHEN TY_NIL_PICK_KO_FLAG = '1' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN NIL_PICK_QTY > 0 THEN 1 ELSE 0 END), 0)
         synonyms:
           - "ko rate"
@@ -346,7 +383,7 @@ tables:
           - "supplier attribution"
 
       - name: wm_attribution_rate
-        description: "Share of nil picks attributed to Walmart (WM)."
+        description: "Share of nil picks where TY_NIL_PICK_WM_FLAG = '1'. Definition unconfirmed — verify with data owner."
         expr: SUM(CASE WHEN TY_NIL_PICK_WM_FLAG = '1' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN NIL_PICK_QTY > 0 THEN 1 ELSE 0 END), 0)
         synonyms:
           - "wm rate"
@@ -354,7 +391,7 @@ tables:
           - "retailer attribution"
 
       - name: phantom_inventory_rate
-        description: "Share of nil picks flagged as possible phantom inventory."
+        description: "Share of nil picks where TY_NIL_PICK_POSSIBLE_PI = '1'. Definition unconfirmed — verify with data owner."
         expr: SUM(CASE WHEN TY_NIL_PICK_POSSIBLE_PI = '1' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN NIL_PICK_QTY > 0 THEN 1 ELSE 0 END), 0)
         synonyms:
           - "pi rate"
@@ -398,6 +435,10 @@ tables:
     primary_key:
       columns:
         - STORE_NBR
+
+    unique_keys:
+      - columns:
+          - CUSTOMER_SID
 
     dimensions:
       - name: store_nbr
@@ -500,15 +541,79 @@ tables:
           - "promo group"
 
   # =========================================================================
+  # DIMENSION: Product — PRODUCT_SID level (one row per product)
+  # =========================================================================
+  - name: product
+    description: >
+      Product dimension at the PRODUCT_SID grain. One row per RCCB finished
+      good. Provides product description and PPG for delivery stop detail.
+      Join delivery_stops to this table on PRODUCT_SID for product-level
+      delivery analysis.
+    base_table:
+      database: CCB_DATASCIENCE_DEV
+      schema: WALMART_OPD
+      table: V_PRODUCT
+
+    primary_key:
+      columns:
+        - PRODUCT_SID
+
+    dimensions:
+      - name: product_sid
+        description: "RCCB product surrogate key — primary key."
+        expr: PRODUCT_SID
+        data_type: NUMBER
+
+      - name: product_id
+        description: "RCCB product (material) ID — 6-digit identifier."
+        expr: PRODUCT_ID
+        data_type: VARCHAR
+        synonyms:
+          - "material id"
+          - "sku"
+          - "material number"
+
+      - name: product_desc
+        description: "RCCB product description from DM dimension."
+        expr: PRODUCT_DESC
+        data_type: VARCHAR
+        synonyms:
+          - "product name"
+          - "material description"
+
+      - name: promoted_package_group_desc
+        description: >
+          Promoted Package Group (PPG) description. Groups related products
+          for trade promotion planning.
+        expr: PROMOTED_PACKAGE_GROUP_DESC
+        data_type: VARCHAR
+        synonyms:
+          - "ppg"
+          - "package group"
+          - "promo group"
+
+  # =========================================================================
   # FACT: Delivery Stop Detail — RCCB delivery execution at customer × product
   # =========================================================================
   - name: delivery_stops
     description: >
-      RCCB delivery stop detail fact table. Contains actual delivery quantities
-      at the customer × product × date grain. Join to store_customer via
-      CUSTOMER_SID and to upc_product via PRODUCT_SID to correlate delivery
-      execution with OPD in-stock performance. Higher delivery frequency and
-      volume may correlate with better FTPR.
+      RCCB delivery stop detail fact table (F_DELIVERY_STOP_DTL_V). Contains
+      actual delivery quantities at the customer × product × date grain.
+
+      ⚠️  CUSTOMER_SID JOIN COVERAGE WARNING: Joining this table to
+      V_STORE_CUSTOMER via CUSTOMER_SID only resolves ~73 of 623 OPD stores
+      (12%). This is because F_DELIVERY_STOP_DTL_V stores historical
+      CUSTOMER_SIDs that do not match the current-account SIDs in
+      V_STORE_CUSTOMER.
+
+      For DELIVERY ACTIVITY (is delivery happening at a store?), use the
+      merch_stops table (F_STOP) filtered to ROLE = 'DC' instead — that
+      joins correctly via CUSTOMER_SID and covers 592–608 of 623 stores.
+      See the verified queries delivery_volume_vs_ftpr_by_store_week and
+      store_ftpr_with_delivery_and_dc for the correct pattern.
+
+      DELIVERED_QTY and ORDERED_QTY from this table are only usable for
+      the ~73 stores whose CUSTOMER_SID happens to match.
     base_table:
       database: CCB_PRD
       schema: DM
@@ -702,6 +807,73 @@ tables:
           - "time in store"
 
   # =========================================================================
+  # FACT: GreenMile Delivery Activity — DC driver stops at store level
+  # =========================================================================
+  - name: delivery_activity
+    description: >
+      GreenMile DC driver stop activity at STORE_NBR grain. Backed by
+      V_GREENMILE_DELIVERY, which joins F_STOP (ROLE='DC') to D_CUSTOMER_V via
+      CUSTOMER_ID (natural key) and extracts store number via regex on
+      CUSTOMER_DESC. This join path resolves 608/623 OPD stores (97.6%).
+
+      Join to walmart_opd_daily on STORE_NBR. This table is the correct source
+      for delivery activity analysis — do NOT use delivery_stops (F_DELIVERY_STOP_DTL_V)
+      for delivery presence, as its CUSTOMER_SID join only resolves 73/623 stores.
+    base_table:
+      database: CCB_DATASCIENCE_DEV
+      schema: WALMART_OPD
+      table: V_GREENMILE_DELIVERY
+
+    dimensions:
+      - name: store_nbr
+        description: "Walmart store number — join key to OPD data."
+        expr: STORE_NBR
+        data_type: NUMBER
+
+      - name: distribution_center_desc
+        description: "RCCB distribution center serving this store."
+        expr: DISTRIBUTION_CENTER_DESC
+        data_type: VARCHAR
+        synonyms:
+          - "dc"
+          - "distribution center"
+
+    time_dimensions:
+      - name: route_date
+        description: "DC driver route date (date of delivery stop)."
+        expr: ROUTE_DATE
+        data_type: DATE
+        synonyms:
+          - "delivery date"
+          - "stop date"
+
+      - name: actual_arrival_date
+        description: "Actual arrival timestamp at the store."
+        expr: ACTUAL_ARRIVAL_DATE
+        data_type: TIMESTAMP
+
+      - name: actual_departure_date
+        description: "Actual departure timestamp from the store."
+        expr: ACTUAL_DEPARTURE_DATE
+        data_type: TIMESTAMP
+
+    metrics:
+      - name: delivery_stop_count
+        description: "Number of DC driver delivery stops at this store."
+        expr: COUNT(*)
+        synonyms:
+          - "delivery count"
+          - "delivery frequency"
+          - "number of deliveries"
+
+      - name: avg_delivery_duration_mins
+        description: "Average delivery stop duration in minutes."
+        expr: AVG(DATEDIFF('minute', ACTUAL_ARRIVAL_DATE, ACTUAL_DEPARTURE_DATE))
+        synonyms:
+          - "delivery time"
+          - "time at store"
+
+  # =========================================================================
   # DIMENSION: Fiscal Calendar
   # =========================================================================
   - name: fiscal_calendar
@@ -757,6 +929,39 @@ relationships:
     relationship_columns:
       - left_column: CORE_UPC_10
         right_column: CORE_UPC_10
+
+  # Delivery → Store/Customer (CUSTOMER_SID is unique in V_STORE_CUSTOMER)
+  - name: delivery_to_store_customer
+    left_table: delivery_stops
+    right_table: store_customer
+    relationship_columns:
+      - left_column: CUSTOMER_SID
+        right_column: CUSTOMER_SID
+
+  # Merch → Store/Customer (CUSTOMER_SID is unique in V_STORE_CUSTOMER)
+  - name: merch_to_store_customer
+    left_table: merch_stops
+    right_table: store_customer
+    relationship_columns:
+      - left_column: CUSTOMER_SID
+        right_column: CUSTOMER_SID
+
+  # Delivery activity → Store/Customer (STORE_NBR is primary key of store_customer)
+  # Gives Cortex the 608/623-store delivery coverage via V_GREENMILE_DELIVERY.
+  - name: delivery_activity_to_store_customer
+    left_table: delivery_activity
+    right_table: store_customer
+    relationship_columns:
+      - left_column: STORE_NBR
+        right_column: STORE_NBR
+
+  # Delivery → Product (PRODUCT_SID is unique in V_PRODUCT)
+  - name: delivery_to_product
+    left_table: delivery_stops
+    right_table: product
+    relationship_columns:
+      - left_column: PRODUCT_SID
+        right_column: PRODUCT_SID
 
 # =============================================================================
 # VERIFIED QUERIES — Teach Cortex Analyst the correct join patterns
@@ -897,91 +1102,159 @@ verified_queries:
       HAVING SUM(OPD.FTPR_DNMNTR) > 500
       ORDER BY ftpr_rate ASC
 
-  # --- Cross-table: OPD × Delivery (via store_customer → delivery) ---
-  - name: delivery_volume_vs_ftpr
+  - name: worst_skus_by_ftpr
+    question: "Which SKUs have the worst FTPR?"
+    sql: |
+      SELECT
+        OPD.ORIGINAL_ITEM_DESC,
+        OPD.ORIGINAL_UPC,
+        OPD.BRAND,
+        OPD.CATEGORY,
+        UP.PROMOTED_PACKAGE_GROUP_DESC AS ppg,
+        SUM(OPD.FTPR_NMRTR) / NULLIF(SUM(OPD.FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(OPD.FTPR_DNMNTR) AS total_picks,
+        SUM(OPD.NIL_PICK_QTY) AS total_nil_picks
+      FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA OPD
+      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_UPC_PRODUCT UP
+        ON OPD.CORE_UPC_10 = UP.CORE_UPC_10
+      WHERE OPD.DATE_SID >= '20250101'
+        AND OPD.STORE_NBR != 9999
+      GROUP BY OPD.ORIGINAL_ITEM_DESC, OPD.ORIGINAL_UPC, OPD.BRAND, OPD.CATEGORY,
+               UP.PROMOTED_PACKAGE_GROUP_DESC
+      HAVING SUM(OPD.FTPR_DNMNTR) > 100
+      ORDER BY ftpr_rate ASC
+      LIMIT 20
+
+  - name: nil_pick_rate_by_dc
+    question: "Which DC has the worst nil pick rate?"
+    sql: |
+      SELECT
+        SC.DISTRIBUTION_CENTER_DESC AS dc,
+        SUM(OPD.SCHDL_NIL_PICK_RATE_NMRTR) / NULLIF(SUM(OPD.SCHDL_NIL_PICK_RATE_DNMNTR), 0) AS nil_pick_rate,
+        SUM(OPD.FTPR_NMRTR) / NULLIF(SUM(OPD.FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(OPD.FTPR_DNMNTR) AS total_picks,
+        COUNT(DISTINCT OPD.STORE_NBR) AS store_count
+      FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA OPD
+      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER SC
+        ON OPD.STORE_NBR = SC.STORE_NBR
+      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_UPC_PRODUCT UP
+        ON OPD.CORE_UPC_10 = UP.CORE_UPC_10
+      WHERE OPD.DATE_SID >= '20250101'
+        AND OPD.STORE_NBR != 9999
+      GROUP BY SC.DISTRIBUTION_CENTER_DESC
+      ORDER BY nil_pick_rate DESC
+
+  # --- Cross-table: OPD × Delivery (via GreenMile F_STOP ROLE='DC') ---
+  # NOTE: Return store × week grain with FTPR numerator/denominator AND delivery
+  # columns side by side. Do NOT pre-aggregate into buckets or summaries.
+  #
+  # DELIVERY COVERAGE (verified June 2026, direct Snowflake test):
+  #   608 of 623 OPD stores (97.6%) have RCCB delivery stops in GreenMile
+  #   (F_STOP ROLE='DC'). 15 stores have no match (bridge or route gap).
+  #   Source: CCB_PRD.GREEN_MILE_CORE.F_STOP joined to D_CUSTOMER_V via
+  #   CUSTOMER_ID, store extracted via REGEXP_SUBSTR on CUSTOMER_DESC.
+  #
+  #   ⚠️  DO NOT JOIN via F_DELIVERY_STOP_DTL_V.CUSTOMER_SID — that path only
+  #   resolves 73/623 stores (12%) due to historical SID mismatch. Always use
+  #   the F_STOP ROLE='DC' + D_CUSTOMER_V.CUSTOMER_ID pattern shown below.
+  - name: delivery_volume_vs_ftpr_by_store_week
     question: "Is there a relationship between delivery volume and FTPR?"
     sql: |
-      WITH store_ftpr AS (
+      WITH del_weekly AS (
         SELECT
-          OPD.STORE_NBR,
-          SC.CUSTOMER_SID,
-          SUM(OPD.FTPR_NMRTR) / NULLIF(SUM(OPD.FTPR_DNMNTR), 0) AS ftpr_rate,
-          SUM(OPD.FTPR_DNMNTR) AS total_picks
-        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA OPD
-        JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER SC
-          ON OPD.STORE_NBR = SC.STORE_NBR
-        WHERE OPD.DATE_SID >= '20250101'
-          AND OPD.STORE_NBR != 9999
-        GROUP BY OPD.STORE_NBR, SC.CUSTOMER_SID
-        HAVING SUM(OPD.FTPR_DNMNTR) > 500
+          REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+          DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE))                             AS week_start,
+          COUNT(*)                                                             AS delivery_stop_count,
+          MAX(GM.ACTUAL_DEPARTURE_DATE)                                       AS last_del_departure
+        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+        JOIN CCB_PRD.DM.D_CUSTOMER_V C
+            ON GM.CUSTOMER_ID = C.CUSTOMER_ID
+            AND C.CURRENT_IND = 'Y'
+            AND C.ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+            AND C.BUSINESS_TYPE_DESC = 'DSD'
+            AND REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+          AND GM.ROLE = 'DC'
+          AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+        GROUP BY 1, 2
       ),
-      store_delivery AS (
+      opd_weekly AS (
         SELECT
-          D.CUSTOMER_SID,
-          SUM(D.DELIVERED_QTY) AS total_cases_delivered,
-          COUNT(DISTINCT D.DELIVERY_DATE_SID) AS delivery_days
-        FROM CCB_PRD.DM.F_DELIVERY_STOP_DTL_V D
-        WHERE D.DELIVERY_DATE_SID >= 20250101
-        GROUP BY D.CUSTOMER_SID
+          STORE_NBR,
+          DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start,
+          SUM(FTPR_NMRTR)   AS ftpr_nmrtr,
+          SUM(FTPR_DNMNTR)  AS ftpr_dnmntr,
+          SUM(NIL_PICK_QTY) AS nil_pick_qty
+        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA
+        WHERE DATE_SID >= '20250101' AND STORE_NBR <> 9999
+        GROUP BY 1, 2
+      ),
+      sc AS (
+        SELECT STORE_NBR, DISTRIBUTION_CENTER_DESC
+        FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER
       )
       SELECT
-        F.STORE_NBR,
-        F.ftpr_rate,
-        F.total_picks,
-        COALESCE(DEL.total_cases_delivered, 0) AS total_cases_delivered,
-        COALESCE(DEL.delivery_days, 0) AS delivery_days,
-        CASE
-          WHEN DEL.delivery_days > 0
-          THEN DEL.total_cases_delivered / DEL.delivery_days
-          ELSE 0
-        END AS avg_cases_per_delivery_day
-      FROM store_ftpr F
-      LEFT JOIN store_delivery DEL ON F.CUSTOMER_SID = DEL.CUSTOMER_SID
-      ORDER BY F.ftpr_rate ASC
-      LIMIT 50
+        opd.STORE_NBR,
+        sc.DISTRIBUTION_CENTER_DESC                                         AS dc,
+        opd.week_start,
+        opd.ftpr_nmrtr,
+        opd.ftpr_dnmntr,
+        opd.ftpr_nmrtr / NULLIF(opd.ftpr_dnmntr, 0)                        AS ftpr_rate,
+        opd.nil_pick_qty,
+        COALESCE(del.delivery_stop_count, 0)                                AS delivery_stop_count,
+        CASE WHEN del.store_nbr IS NOT NULL THEN 1 ELSE 0 END               AS is_delivery_active_week
+      FROM opd_weekly opd
+      LEFT JOIN sc ON opd.STORE_NBR = sc.STORE_NBR
+      LEFT JOIN del_weekly del
+        ON opd.STORE_NBR = del.store_nbr AND opd.week_start = del.week_start
+      ORDER BY opd.STORE_NBR, opd.week_start
     use_as_onboarding_question: true
 
   # --- Cross-table: OPD × Merch (via store_customer → merch_stops) ---
-  - name: merch_visits_vs_ftpr
+  # NOTE: Return store × week grain with FTPR numerator/denominator AND merch
+  # columns side by side. Do NOT bucket or pre-aggregate.
+  #
+  # MERCH/DELIVERY COVERAGE (verified from CCB_PRD.GREEN_MILE_CORE.F_STOP):
+  #   GreenMile covers all stores served by RCCB routes. Most stores have merch
+  #   visits (ROLE LIKE '%MERCH%'). delivery_visits (ROLE = 'DC') reflects stops
+  #   where a DC driver visited — overlapping with F_DELIVERY_STOP_DTL_V coverage.
+  #   Stores with zero merch visits for a week are legitimately unvisited that week,
+  #   not a join failure. Condition merch analyses on merch_visits > 0.
+  - name: merch_visits_vs_ftpr_by_store_week
     question: "Do stores with more merch visits have better FTPR?"
     sql: |
-      WITH store_ftpr AS (
-        SELECT
-          OPD.STORE_NBR,
-          SC.CUSTOMER_SID,
-          SUM(OPD.FTPR_NMRTR) / NULLIF(SUM(OPD.FTPR_DNMNTR), 0) AS ftpr_rate,
-          SUM(OPD.FTPR_DNMNTR) AS total_picks
-        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA OPD
-        JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER SC
-          ON OPD.STORE_NBR = SC.STORE_NBR
-        WHERE OPD.DATE_SID >= '20250101'
-          AND OPD.STORE_NBR != 9999
-        GROUP BY OPD.STORE_NBR, SC.CUSTOMER_SID
-        HAVING SUM(OPD.FTPR_DNMNTR) > 500
-      ),
-      store_merch AS (
-        SELECT
-          GM.CUSTOMER_SID,
-          COUNT(CASE WHEN GM.ROLE LIKE '%MERCH%' THEN 1 END) AS merch_visits,
-          COUNT(CASE WHEN GM.ROLE = 'DC' THEN 1 END) AS delivery_visits,
-          AVG(CASE WHEN GM.ROLE LIKE '%MERCH%'
-            THEN DATEDIFF('minute', GM.ACTUAL_ARRIVAL_DATE, GM.ACTUAL_DEPARTURE_DATE)
-          END) AS avg_merch_duration_mins
-        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
-        WHERE GM.ROUTE_DATE >= '2025-01-01'
-        GROUP BY GM.CUSTOMER_SID
-      )
       SELECT
-        F.STORE_NBR,
-        F.ftpr_rate,
-        F.total_picks,
-        COALESCE(M.merch_visits, 0) AS merch_visits,
-        COALESCE(M.delivery_visits, 0) AS delivery_visits,
-        M.avg_merch_duration_mins
-      FROM store_ftpr F
-      LEFT JOIN store_merch M ON F.CUSTOMER_SID = M.CUSTOMER_SID
-      ORDER BY F.ftpr_rate ASC
-      LIMIT 50
+        sc.STORE_NBR,
+        sc.DISTRIBUTION_CENTER_DESC AS dc,
+        DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) AS week_start,
+        SUM(opd.FTPR_NMRTR) AS ftpr_nmrtr,
+        SUM(opd.FTPR_DNMNTR) AS ftpr_dnmntr,
+        SUM(opd.FTPR_NMRTR) / NULLIF(SUM(opd.FTPR_DNMNTR), 0) AS ftpr_rate,
+        MAX(COALESCE(m.merch_visits, 0)) AS merch_visits,
+        MAX(COALESCE(m.delivery_visits, 0)) AS delivery_visits,
+        MAX(m.avg_merch_duration_mins) AS avg_merch_duration_mins
+      FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA opd
+      JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER sc
+        ON opd.STORE_NBR = sc.STORE_NBR
+      LEFT JOIN (
+        SELECT
+          gm.CUSTOMER_SID,
+          DATE_TRUNC('WEEK', gm.ROUTE_DATE) AS week_start,
+          COUNT(CASE WHEN gm.ROLE LIKE '%MERCH%' THEN 1 END) AS merch_visits,
+          COUNT(CASE WHEN gm.ROLE = 'DC' THEN 1 END) AS delivery_visits,
+          AVG(CASE WHEN gm.ROLE LIKE '%MERCH%'
+            THEN DATEDIFF('minute', gm.ACTUAL_ARRIVAL_DATE, gm.ACTUAL_DEPARTURE_DATE)
+          END) AS avg_merch_duration_mins
+        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP gm
+        WHERE gm.ROUTE_DATE >= '2025-01-01'
+        GROUP BY gm.CUSTOMER_SID, DATE_TRUNC('WEEK', gm.ROUTE_DATE)
+      ) m ON sc.CUSTOMER_SID = m.CUSTOMER_SID
+        AND DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD')) = m.week_start
+      WHERE opd.DATE_SID >= '20250101'
+        AND opd.STORE_NBR <> 9999
+      GROUP BY sc.STORE_NBR, sc.DISTRIBUTION_CENTER_DESC,
+               DATE_TRUNC('WEEK', TRY_TO_DATE(opd.DATE_SID, 'YYYYMMDD'))
+      ORDER BY sc.STORE_NBR, week_start
     use_as_onboarding_question: true
 
   # --- Cross-table: OPD × Fiscal Calendar ---
@@ -1015,44 +1288,58 @@ verified_queries:
       ORDER BY ftpr_rate ASC
 
   # --- Cross-table: OPD × DC × Delivery (full chain) ---
-  - name: dc_delivery_and_ftpr
+  # NOTE: Return store × week grain so downstream tools can analyze
+  # within-DC variance over time, not just DC-level averages.
+  # Delivery coverage: 608/623 stores (97.6%) via F_STOP ROLE='DC' pattern.
+  - name: store_ftpr_with_delivery_and_dc
     question: "How does delivery volume per DC relate to in-stock performance?"
     sql: |
-      WITH dc_ftpr AS (
+      WITH del_weekly AS (
         SELECT
-          SC.DISTRIBUTION_CENTER_DESC AS dc,
-          SUM(OPD.FTPR_NMRTR) / NULLIF(SUM(OPD.FTPR_DNMNTR), 0) AS ftpr_rate,
-          SUM(OPD.NIL_PICK_QTY) AS total_nil_picks,
-          COUNT(DISTINCT OPD.STORE_NBR) AS store_count
-        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA OPD
-        JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER SC
-          ON OPD.STORE_NBR = SC.STORE_NBR
-        WHERE OPD.DATE_SID >= '20250101'
-          AND OPD.STORE_NBR != 9999
-        GROUP BY SC.DISTRIBUTION_CENTER_DESC
+          REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+          DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE))                             AS week_start,
+          COUNT(*)                                                             AS delivery_stop_count
+        FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+        JOIN CCB_PRD.DM.D_CUSTOMER_V C
+            ON GM.CUSTOMER_ID = C.CUSTOMER_ID
+            AND C.CURRENT_IND = 'Y'
+            AND C.ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+            AND C.BUSINESS_TYPE_DESC = 'DSD'
+            AND REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+          AND GM.ROLE = 'DC'
+          AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+        GROUP BY 1, 2
       ),
-      dc_delivery AS (
+      opd_weekly AS (
         SELECT
-          SC.DISTRIBUTION_CENTER_DESC AS dc,
-          SUM(D.DELIVERED_QTY) AS total_cases,
-          COUNT(DISTINCT D.DELIVERY_DATE_SID) AS delivery_days,
-          COUNT(DISTINCT D.CUSTOMER_SID) AS customers_delivered
-        FROM CCB_PRD.DM.F_DELIVERY_STOP_DTL_V D
-        JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER SC
-          ON D.CUSTOMER_SID = SC.CUSTOMER_SID
-        WHERE D.DELIVERY_DATE_SID >= 20250101
-        GROUP BY SC.DISTRIBUTION_CENTER_DESC
+          STORE_NBR,
+          DATE_TRUNC('WEEK', TRY_TO_DATE(DATE_SID, 'YYYYMMDD')) AS week_start,
+          SUM(FTPR_NMRTR)   AS ftpr_nmrtr,
+          SUM(FTPR_DNMNTR)  AS ftpr_dnmntr,
+          SUM(NIL_PICK_QTY) AS nil_pick_qty
+        FROM CCB_DATASCIENCE_DEV.PUBLIC.WALMART_STANDARDIZED_EXTERNAL_DATA
+        WHERE DATE_SID >= '20250101' AND STORE_NBR <> 9999
+        GROUP BY 1, 2
       )
       SELECT
-        F.dc,
-        F.ftpr_rate,
-        F.total_nil_picks,
-        F.store_count,
-        COALESCE(DEL.total_cases, 0) AS total_cases_delivered,
-        COALESCE(DEL.delivery_days, 0) AS active_delivery_days,
-        COALESCE(DEL.customers_delivered, 0) AS customers_delivered
-      FROM dc_ftpr F
-      LEFT JOIN dc_delivery DEL ON F.dc = DEL.dc
-      ORDER BY F.ftpr_rate ASC
-  $$
+        opd.STORE_NBR,
+        sc.DISTRIBUTION_CENTER_DESC                              AS dc,
+        opd.week_start,
+        opd.ftpr_nmrtr,
+        opd.ftpr_dnmntr,
+        opd.ftpr_nmrtr / NULLIF(opd.ftpr_dnmntr, 0)             AS ftpr_rate,
+        opd.nil_pick_qty,
+        COALESCE(del.delivery_stop_count, 0)                     AS delivery_stop_count,
+        CASE WHEN del.store_nbr IS NOT NULL THEN 1 ELSE 0 END    AS is_delivery_active_week
+      FROM opd_weekly opd
+      LEFT JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_STORE_CUSTOMER sc
+          ON opd.STORE_NBR = sc.STORE_NBR
+      LEFT JOIN del_weekly del
+          ON opd.STORE_NBR = del.store_nbr AND opd.week_start = del.week_start
+      ORDER BY opd.STORE_NBR, opd.week_start
+$$
 );
+
+-- Verify it was created
+SHOW VIEWS LIKE 'WALMART_OPD' IN SCHEMA CCB_DATASCIENCE_DEV.WALMART_OPD;

@@ -31,6 +31,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,8 @@ from src.orchestrator.pipeline_executor import PipelineConfig, PipelineExecutor
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger(__name__)
 
+_DELIVERY_COVERAGE_WARNING_PREFIX = "DELIVERY_COVERAGE_LOW"
+
 
 @dataclass
 class CLIArgs:
@@ -71,6 +74,7 @@ class CLIArgs:
     dry_run: bool
     prior_run_id: str | None
     use_latest_run_context: bool
+    rerun_communication_from_run: str | None
 
 
 def parse_args() -> CLIArgs:
@@ -135,7 +139,7 @@ def parse_args() -> CLIArgs:
         "--backend",
         type=str,
         choices=["anthropic", "foundry", "foundry-dev", "azure-openai"],
-        default="anthropic",
+        default="foundry-dev",
         help="LLM backend. 'anthropic' uses direct Anthropic API (chris-anderson-anthropic key). "
         "'foundry' uses Azure AI Foundry Anthropic models (raghu-anthropic key, data stays in Azure). "
         "'foundry-dev' uses Azure AI Foundry dev environment (raghu-anthropic-dev key). "
@@ -152,16 +156,35 @@ def parse_args() -> CLIArgs:
         action="store_true",
         help="Auto-load the latest completed run from runs/ as context.",
     )
+    p.add_argument(
+        "--rerun-communication-from-run",
+        type=str,
+        default=None,
+        help="Run only the communication-agent using upstream artifacts from the given run ID.",
+    )
     a = p.parse_args()
 
-    if not a.scheduled and not a.question:
-        p.error("Either --question or --scheduled (with --prompt-config) must be provided.")
-    if a.scheduled and not a.prompt_config:
-        p.error("--scheduled requires --prompt-config.")
-    if a.source == "cortex_analyst" and not a.semantic_view and not a.domain:
-        p.error("--source=cortex_analyst requires --semantic-view or --domain.")
-    if a.source == "file" and not a.data:
-        p.error("--source=file requires --data.")
+    rerun_mode = bool(a.rerun_communication_from_run)
+    if rerun_mode:
+        if a.question or a.scheduled:
+            p.error("--rerun-communication-from-run cannot be combined with --question or --scheduled.")
+        if a.prompt_config:
+            p.error("--rerun-communication-from-run cannot be combined with --prompt-config.")
+        if a.data:
+            p.error("--rerun-communication-from-run does not accept --data.")
+        if a.semantic_view:
+            p.error("--rerun-communication-from-run does not accept --semantic-view.")
+        if a.source != "file":
+            p.error("--rerun-communication-from-run must use default --source=file.")
+    else:
+        if not a.scheduled and not a.question:
+            p.error("Either --question or --scheduled (with --prompt-config) must be provided.")
+        if a.scheduled and not a.prompt_config:
+            p.error("--scheduled requires --prompt-config.")
+        if a.source == "cortex_analyst" and not a.semantic_view and not a.domain:
+            p.error("--source=cortex_analyst requires --semantic-view or --domain.")
+        if a.source == "file" and not a.data:
+            p.error("--source=file requires --data.")
     if a.prior_run_id and a.use_latest_run_context:
         p.error("Use either --prior-run-id or --use-latest-run-context, not both.")
 
@@ -172,7 +195,7 @@ def parse_args() -> CLIArgs:
         data=a.data,
         source=a.source,
         semantic_view=a.semantic_view,
-        backend=getattr(a, 'backend', 'anthropic'),
+        backend=getattr(a, 'backend', 'foundry-dev'),
         domain=a.domain,
         config_path=a.config,
         output_dir=a.output_dir,
@@ -180,6 +203,7 @@ def parse_args() -> CLIArgs:
         dry_run=a.dry_run,
         prior_run_id=a.prior_run_id,
         use_latest_run_context=a.use_latest_run_context,
+        rerun_communication_from_run=a.rerun_communication_from_run,
     )
 
 
@@ -195,6 +219,89 @@ def _truncate_text(text: str, max_chars: int = 8_000) -> str:
     return f"{text[:max_chars]}... [truncated {len(text) - max_chars} chars]"
 
 
+def _sanitize_rendered_markdown(text: str) -> str:
+    """Normalize punctuation/spacing that commonly breaks markdown rendering."""
+    if not text:
+        return text
+
+    # Remove zero-width and BOM-like characters that can split words visually.
+    text = re.sub(r"[\u200B-\u200F\u2060\uFEFF]", "", text)
+
+    # Normalize spacing variants.
+    text = text.replace("\u00A0", " ").replace("\u202F", " ")
+
+    # Normalize punctuation that often renders inconsistently across viewers.
+    replacements = {
+        "\u2012": "-",  # figure dash
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2015": "-",  # horizontal bar
+        "\u2212": "-",  # minus sign
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote
+        "\u201C": '"',  # left double quote
+        "\u201D": '"',  # right double quote
+        "\u2217": "*",  # asterisk operator
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+
+    # Ensure unicode-asterisk bold markers become regular markdown bold markers.
+    text = re.sub(r"\*\*+", "**", text)
+
+    # Fix nested bold wrappers like:
+    #   > **... **value** ...**
+    # Many markdown renderers mis-handle this and produce corrupted text.
+    # Keep inner emphasis, drop the outer wrapper when nesting is detected.
+    normalized_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("> **") and stripped.endswith("**") and stripped.count("**") > 2:
+            # Remove outer "> **" and trailing "**"; preserve any inner bold spans.
+            body = stripped[4:-2].strip()
+            line = re.sub(r"^\s*>\s*\*\*.*?\*\*\s*$", f"> {body}", line)
+        elif stripped.startswith("**") and stripped.endswith("**") and stripped.count("**") > 2:
+            # Same normalization for non-blockquote lines.
+            line = line.replace("**", "", 1)
+            line = line[::-1].replace("**"[::-1], "", 1)[::-1]
+        normalized_lines.append(line)
+    text = "\n".join(normalized_lines)
+
+    # Escape currency '$' outside fenced code blocks so markdown renderers that
+    # support math don't consume spans like "$2.61 to $4.87" as inline math.
+    escaped_lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            escaped_lines.append(line)
+            continue
+        if in_fence:
+            escaped_lines.append(line)
+            continue
+        line = re.sub(r"(?<!\\)\$(?=\d)", r"\\$", line)
+        escaped_lines.append(line)
+    text = "\n".join(escaped_lines)
+
+    # Normalize unicode asterisk to ASCII outside code fences and collapse
+    # malformed long star runs that can break emphasis rendering.
+    final_lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            final_lines.append(line)
+            continue
+        if in_fence:
+            final_lines.append(line)
+            continue
+        line = line.replace("∗", "*")
+        line = re.sub(r"\*{3,}", "**", line)
+        final_lines.append(line)
+    text = "\n".join(final_lines)
+    return text
+
+
 def _resolve_latest_run_id(runs_root: Path) -> str | None:
     """Return the latest run directory id that contains run.jsonl."""
     if not runs_root.exists():
@@ -208,6 +315,25 @@ def _resolve_latest_run_id(runs_root: Path) -> str | None:
     if not candidates:
         return None
     return sorted(candidates)[-1]
+
+
+def _topic_slug(*, question: str | None, proactive_prompt: str | None, domain: str | None) -> str:
+    """Build a short, filesystem-safe domain slug for output filenames."""
+    # Naming policy: timestamp + domain slug.
+    # Question/prompt text are intentionally ignored for output filenames.
+    source = (domain or "analysis").strip().lower()
+    source = re.sub(r"[^a-z0-9]+", "-", source).strip("-")
+    if not source:
+        return "analysis"
+    return source
+
+
+def _build_output_stem(*, run_id: str, question: str | None, proactive_prompt: str | None, domain: str | None) -> str:
+    """Return filename stem: <timestamp>-<domain>."""
+    # run_id format: YYYYMMDDTHHMMSSZ-xxxxxxxx
+    timestamp = run_id.split("-", 1)[0]
+    slug = _topic_slug(question=question, proactive_prompt=proactive_prompt, domain=domain)
+    return f"{timestamp}-{slug}"
 
 
 def _load_previous_run_context(
@@ -273,6 +399,77 @@ def _load_previous_run_context(
                     break
 
     return context
+
+
+def _load_run_metadata(*, run_id: str, runs_root: Path = Path("runs")) -> dict[str, Any]:
+    """Load key metadata from a prior run (question/domain/backend/file id)."""
+    run_jsonl = runs_root / run_id / "run.jsonl"
+    if not run_jsonl.exists():
+        return {}
+
+    metadata: dict[str, Any] = {}
+    with run_jsonl.open("r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = event.get("msg", "")
+            attrs = event.get("attrs", {})
+            if not isinstance(attrs, dict):
+                continue
+
+            if msg.startswith("Prompt submitted"):
+                metadata["question"] = attrs.get("question")
+                metadata["proactive_prompt"] = attrs.get("proactive_prompt")
+            elif msg.startswith("Pipeline run starting"):
+                domain = attrs.get("domain")
+                metadata["domain"] = None if domain in (None, "(none)") else domain
+            elif msg.startswith("Dataset uploaded to Anthropic Files API"):
+                metadata["dataset_file_id"] = attrs.get("file_id")
+    return metadata
+
+
+def _load_upstream_artifacts_for_communication(
+    *,
+    run_id: str,
+    runs_root: Path = Path("runs"),
+    max_stage_index: int = 5,
+) -> dict[str, dict[str, Any]]:
+    """Load prior stage artifacts required to re-run communication-agent only."""
+    artifacts_dir = runs_root / run_id / "artifacts"
+    if not artifacts_dir.exists():
+        raise FileNotFoundError(f"Artifacts directory not found for run_id={run_id}: {artifacts_dir}")
+
+    upstream: dict[str, dict[str, Any]] = {}
+    for path in sorted(artifacts_dir.glob("*.json")):
+        stem = path.stem
+        if "-" not in stem:
+            continue
+        index_text, agent_name = stem.split("-", 1)
+        if not index_text.isdigit():
+            continue
+        if int(index_text) > max_stage_index:
+            continue
+
+        with path.open("r", encoding="utf-8") as f:
+            artifact = json.load(f)
+        if isinstance(artifact, dict) and "payload" in artifact:
+            upstream[agent_name] = artifact
+
+    if not upstream:
+        raise ValueError(f"No upstream artifacts found for run_id={run_id} up to stage {max_stage_index}.")
+    return upstream
+
+
+def _delivery_coverage_gate_warning(warnings: list[str] | None) -> str | None:
+    """Return delivery coverage gate warning, if emitted by Cortex client."""
+    if not warnings:
+        return None
+    for warning in warnings:
+        if isinstance(warning, str) and warning.startswith(_DELIVERY_COVERAGE_WARNING_PREFIX):
+            return warning
+    return None
 
 
 def main() -> int:
@@ -377,6 +574,154 @@ def main() -> int:
                     prior_run_id=prior_run_id,
                 )
 
+    if args.backend == "azure-openai":
+        from src.api.litellm_client import LiteLLMClient
+
+        client = LiteLLMClient(api_key=llm_api_key)  # type: ignore[assignment]
+        logger.info("Using Azure OpenAI backend via LiteLLM: %s", _AZURE_OPENAI_BASE_URL)
+    else:
+        _foundry_urls = {
+            "foundry": _FOUNDRY_BASE_URL,
+            "foundry-dev": _FOUNDRY_DEV_BASE_URL,
+        }
+        client = ClaudeClient(
+            api_key=llm_api_key,
+            backend=args.backend if args.backend != "foundry-dev" else "foundry",
+            base_url=_foundry_urls.get(args.backend),
+        )
+
+    budget = BudgetTracker(
+        budget_tokens=cfg.get("budget_tokens_default", 1_200_000),
+        cost_per_million=cfg.get("cost_per_million", {}),
+        max_cost_usd=cfg.get("max_cost_usd"),
+        cost_warning_thresholds=cfg.get("cost_warning_thresholds", [0.5, 0.75, 0.9]),
+    )
+
+    if args.rerun_communication_from_run:
+        source_run_id = args.rerun_communication_from_run
+        source_metadata = _load_run_metadata(run_id=source_run_id, runs_root=Path("runs"))
+        effective_domain = args.domain or source_metadata.get("domain")
+        run_logger.info(
+            "Communication-agent-only rerun starting",
+            run_id=run_id,
+            source_run_id=source_run_id,
+            domain=effective_domain or "(none)",
+            backend=args.backend,
+        )
+
+        try:
+            upstream_artifacts = _load_upstream_artifacts_for_communication(
+                run_id=source_run_id,
+                runs_root=Path("runs"),
+            )
+        except Exception as e:
+            run_logger.error("Could not load upstream artifacts for communication rerun", error=str(e))
+            return 1
+
+        executor = PipelineExecutor(
+            client=client,
+            config=pipeline_cfg,
+            run_logger=run_logger,
+            tracer=tracer,
+            budget=budget,
+            lineage=lineage,
+            domain=effective_domain,
+            previous_run_context=previous_run_context,
+        )
+
+        with tracer.span("pipeline.communication_only"):
+            stage_result = executor.rerun_communication_agent(
+                upstream_artifacts=upstream_artifacts,
+                dataset_file_id=None,
+            )
+
+        if stage_result.status != "ok":
+            run_logger.error(
+                "Communication-agent-only rerun failed",
+                source_run_id=source_run_id,
+                error=stage_result.error or "unknown error",
+            )
+            return 1
+
+        payload = stage_result.artifact.get("payload", {})
+        if not isinstance(payload, dict):
+            run_logger.error("Communication rerun produced invalid payload type")
+            return 1
+
+        lineage.add_artifact_statistics(
+            agent="communication-agent",
+            stage_index=stage_result.stage_index,
+            payload=payload,
+        )
+
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        rendered = _sanitize_rendered_markdown(str(payload.get("rendered_output_markdown", "")))
+        if not rendered.strip():
+            run_logger.error("Communication rerun returned empty rendered_output_markdown")
+            return 1
+
+        from datetime import datetime, timezone
+        question_text = (
+            source_metadata.get("question")
+            or source_metadata.get("proactive_prompt")
+            or "(communication-only rerun)"
+        )
+        run_date = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        metadata_header = (
+            f"> **Run date:** {run_date}  \n"
+            f"> **Question:** {question_text}  \n"
+            f"> **Run ID:** `{run_id}` | **Backend:** `{args.backend}` | "
+            f"**Domain:** `{effective_domain or '(none)'}` | "
+            f"**Mode:** `communication-only rerun` | "
+            f"**Source run:** `{source_run_id}`\n\n"
+        )
+        rendered = _sanitize_rendered_markdown(metadata_header + rendered)
+
+        from src.orchestrator.hitl_gate import build_review_prompt, evaluate as hitl_evaluate
+
+        decision = hitl_evaluate(
+            run_id=run_id,
+            output_dir=args.output_dir,
+            comms_payload=payload,
+            threshold=cfg.get("hitl_review_threshold"),
+            output_stem=_build_output_stem(
+                run_id=run_id,
+                question=None,
+                proactive_prompt=None,
+                domain=effective_domain,
+            ),
+        )
+        decision.final_md_path.write_text(rendered, encoding="utf-8")
+        if decision.gated and decision.review_prompt_path is not None:
+            decision.review_prompt_path.write_text(
+                build_review_prompt(run_id=run_id, decision=decision),
+                encoding="utf-8",
+            )
+            run_logger.warning(
+                "HITL gate triggered for communication-only rerun",
+                threshold=decision.threshold,
+                findings_for_review=len(decision.findings_triggering_review),
+                pending_path=str(decision.final_md_path),
+                review_prompt=str(decision.review_prompt_path),
+            )
+        else:
+            run_logger.info("Communication-only output written", path=str(decision.final_md_path))
+
+        tracer_path = run_logger.write_spans(tracer.to_jsonl())
+        lineage_path = run_logger.write_lineage(lineage.manifest())
+        run_logger.info(
+            "Communication-only rerun complete",
+            status="ok",
+            source_run_id=source_run_id,
+            total_tokens=budget.total_tokens(),
+            total_cost_usd=round(budget.total_cost(), 4),
+            run_dir=str(run_logger.run_dir),
+            spans=str(tracer_path),
+            lineage=str(lineage_path),
+            output_path=str(decision.final_md_path),
+        )
+        return 0
+
     run_logger.info("Pipeline run starting", run_id=run_id, data=str(args.data or args.semantic_view), domain=args.domain or "(none)")
 
     # ---- Acquire data: file-based or Cortex Analyst ----
@@ -425,6 +770,14 @@ def main() -> int:
                 sql=_truncate_text(response.generated_sql),
             )
 
+            gate_warning = _delivery_coverage_gate_warning(response.warnings)
+            if gate_warning:
+                run_logger.warning(
+                    "Delivery coverage low — proceeding with caveat; delivery analysis will be flagged as unreliable",
+                    warning=gate_warning,
+                    request_id=response.request_id,
+                )
+
         if response.dataframe.empty:
             run_logger.error("Cortex Analyst returned no data. Cannot proceed.")
             return 3
@@ -457,27 +810,6 @@ def main() -> int:
         columns=len(dataset.column_metadata),
         free_text_cols=len(dataset.free_text_columns_sanitized),
         sampled=dataset.was_sampled,
-    )
-
-    if args.backend == "azure-openai":
-        from src.api.litellm_client import LiteLLMClient
-        client = LiteLLMClient(api_key=llm_api_key)  # type: ignore[assignment]
-        logger.info("Using Azure OpenAI backend via LiteLLM: %s", _AZURE_OPENAI_BASE_URL)
-    else:
-        _foundry_urls = {
-            "foundry": _FOUNDRY_BASE_URL,
-            "foundry-dev": _FOUNDRY_DEV_BASE_URL,
-        }
-        client = ClaudeClient(
-            api_key=llm_api_key,
-            backend=args.backend if args.backend != "foundry-dev" else "foundry",
-            base_url=_foundry_urls.get(args.backend),
-        )
-    budget = BudgetTracker(
-        budget_tokens=cfg.get("budget_tokens_default", 1_200_000),
-        cost_per_million=cfg.get("cost_per_million", {}),
-        max_cost_usd=cfg.get("max_cost_usd"),
-        cost_warning_thresholds=cfg.get("cost_warning_thresholds", [0.5, 0.75, 0.9]),
     )
 
     # ---- Upload dataset to Anthropic Files API for code execution ----
@@ -562,13 +894,19 @@ def main() -> int:
             f"> **Run ID:** `{run_id}` | **Backend:** `{args.backend}` | "
             f"**Domain:** `{args.domain or '(none)'}`\n\n"
         )
-        rendered = metadata_header + rendered
+        rendered = _sanitize_rendered_markdown(metadata_header + str(rendered))
 
         decision = hitl_evaluate(
             run_id=run_id,
             output_dir=args.output_dir,
             comms_payload=payload,
             threshold=cfg.get("hitl_review_threshold"),
+            output_stem=_build_output_stem(
+                run_id=run_id,
+                question=args.question,
+                proactive_prompt=proactive_prompt,
+                domain=args.domain,
+            ),
         )
         decision.final_md_path.write_text(rendered, encoding="utf-8")
         if decision.gated and decision.review_prompt_path is not None:

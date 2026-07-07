@@ -45,19 +45,22 @@ def evaluate(
     output_dir: Path,
     comms_payload: dict[str, Any],
     threshold: str | None,
+    output_stem: str | None = None,
 ) -> HITLDecision:
     """Decide where to write the final markdown and (optionally) a review prompt.
 
     Returns a HITLDecision that the caller uses to write the actual files.
     Does NOT write anything itself — file IO is the caller's concern.
     """
+    stem = output_stem or run_id
+
     if not threshold:
         # Gate disabled; publish straight through.
         return HITLDecision(
             gated=False,
             threshold=None,
             findings_triggering_review=[],
-            final_md_path=output_dir / f"{run_id}.md",
+            final_md_path=output_dir / f"{stem}.md",
             review_prompt_path=None,
         )
 
@@ -68,7 +71,7 @@ def evaluate(
             gated=False,
             threshold=threshold,
             findings_triggering_review=[],
-            final_md_path=output_dir / f"{run_id}.md",
+            final_md_path=output_dir / f"{stem}.md",
             review_prompt_path=None,
         )
 
@@ -85,7 +88,7 @@ def evaluate(
             gated=False,
             threshold=threshold,
             findings_triggering_review=[],
-            final_md_path=output_dir / f"{run_id}.md",
+            final_md_path=output_dir / f"{stem}.md",
             review_prompt_path=None,
         )
 
@@ -94,8 +97,8 @@ def evaluate(
         gated=True,
         threshold=threshold,
         findings_triggering_review=triggering,
-        final_md_path=output_dir / f"{run_id}-pending-review.md",
-        review_prompt_path=output_dir / f"{run_id}-review-prompt.md",
+        final_md_path=output_dir / f"{stem}-pending-review.md",
+        review_prompt_path=output_dir / f"{stem}-review-prompt.md",
     )
 
 

@@ -191,6 +191,27 @@ class PipelineExecutor:
         )
         return QuestionFramerPayload.model_validate(artifact["payload"])
 
+    def rerun_communication_agent(
+        self,
+        *,
+        upstream_artifacts: dict[str, dict[str, Any]],
+        dataset_file_id: str | None = None,
+        stage_index: int = 6,
+    ) -> StageResult:
+        """Run only the communication-agent from existing upstream artifacts.
+
+        Useful for iterative output-format tuning without re-running all analytical
+        stages. Expects prior stage artifacts (typically question-framer through
+        findings-validator).
+        """
+        return self._execute_stage(
+            stage_index=stage_index,
+            agent="communication-agent",
+            skills=[],
+            upstream_artifacts=upstream_artifacts,
+            dataset_file_id=dataset_file_id,
+        )
+
     # ---------- Main pipeline loop ----------
 
     def execute_pipeline(

@@ -19,6 +19,8 @@ dependencies = [
     # prompt caching + code execution + Files API support, which LiteLLM does
     # not yet abstract fully. See src/api/llm_client.py for the dispatch.
     "litellm>=1.50.0",
+    # Semantic View Builder web app
+    "streamlit>=1.35.0",
 ]
 
 [dependency-groups]

@@ -129,6 +129,39 @@ INNER JOIN CCB_DATASCIENCE_DEV.WALMART_OPD.V_UPC_PRODUCT UP
 WHERE OPD.STORE_NBR != 9999;
 
 -- =============================================================================
+-- 5. V_GREENMILE_DELIVERY — Store-level DC delivery stop activity
+--    Joins F_STOP (ROLE='DC') to D_CUSTOMER_V via CUSTOMER_ID (natural key)
+--    and extracts STORE_NBR via regex on CUSTOMER_DESC.
+--
+--    WHY THIS EXISTS: The CUSTOMER_SID join path (V_STORE_CUSTOMER → F_STOP)
+--    only resolves ~73/623 OPD stores for ROLE='DC' stops because DC driver
+--    records use historical CUSTOMER_SIDs. Joining via CUSTOMER_ID (natural key)
+--    resolves 608/623 stores (97.6%) — verified June 2026.
+--
+--    Grain: one row per store × route_date × stop_id.
+--    Join to OPD/store data on STORE_NBR.
+-- =============================================================================
+CREATE OR REPLACE VIEW WALMART_OPD.V_GREENMILE_DELIVERY AS
+SELECT
+    REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS STORE_NBR,
+    C.DISTRIBUTION_CENTER_DESC,
+    DATE(GM.ROUTE_DATE)                AS ROUTE_DATE,
+    GM.ACTUAL_ARRIVAL_DATE,
+    GM.ACTUAL_DEPARTURE_DATE
+FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+JOIN CCB_PRD.DM.D_CUSTOMER_V C
+    ON GM.CUSTOMER_ID = C.CUSTOMER_ID
+    AND C.CURRENT_IND = 'Y'
+    AND C.ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+    AND C.BUSINESS_TYPE_DESC = 'DSD'
+    AND REGEXP_SUBSTR(C.CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+WHERE GM.ROLE = 'DC'
+  AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL;
+
+-- Grant access to the runtime role
+GRANT SELECT ON VIEW WALMART_OPD.V_GREENMILE_DELIVERY TO ROLE CCB_DATASCIENCE_SNOWFLAKE;
+
+-- =============================================================================
 -- Verify bridge views
 -- =============================================================================
 
