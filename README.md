@@ -107,6 +107,9 @@ output/                    Generated reports and action cards land here
 config/                    Pipeline config, thresholds, delivery config
 tests/                     Schema, prompt-assembly, pipeline composition tests
 docs/                      Architecture, agent/skill authoring guides, demo walkthrough
+webapp/                    Self-contained web frontend (FastAPI + SQLite): accounts,
+                           per-user semantic views, runs with live logs, schedules.
+                           Own venv/tests; see webapp/README.md
 ```
 
 Detailed layout — including the specific markdown and Python files that will populate each directory — is in Part 2 of [mvp_plan.md](mvp_plan.md).

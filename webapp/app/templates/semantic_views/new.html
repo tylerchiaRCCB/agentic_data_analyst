@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}New Semantic View{% endblock %}
+{% block content %}
+<h1>New semantic view</h1>
+<form method="post" action="/semantic-views" enctype="multipart/form-data" class="form-narrow">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name
+    <input type="text" name="name" required placeholder="e.g. sales_semantic_model">
+  </label>
+  <label>Description
+    <input type="text" name="description" placeholder="What warehouse/domain does this cover?">
+  </label>
+  <label>Upload YAML file
+    <input type="file" name="yaml_file" accept=".yaml,.yml,text/yaml">
+  </label>
+  <label>…or paste YAML
+    <textarea name="yaml_text" rows="12" placeholder="name: my_semantic_model&#10;tables: ..."></textarea>
+  </label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}

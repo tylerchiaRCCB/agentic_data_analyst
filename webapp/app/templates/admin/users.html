@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h1>Users</h1>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Active</th><th>Last login</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td>{{ u.username }}</td>
+      <td class="muted">{{ u.display_name }}</td>
+      <td>
+        <select name="role" form="user-form-{{ u.id }}" class="compact-select">
+          {% for r in roles %}<option value="{{ r }}" {% if u.role == r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </td>
+      <td><input type="checkbox" name="is_active" form="user-form-{{ u.id }}" {% if u.is_active %}checked{% endif %}></td>
+      <td class="muted">{{ u.last_login_at | dt }}</td>
+      <td class="actions">
+        <form id="user-form-{{ u.id }}" method="post" action="/admin/users/{{ u.id }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">Save</button>
+        </form>
+        <form method="post" action="/admin/users/{{ u.id }}/reset-password" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">Reset password</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<article class="card-narrow">
+  <h3>Add user</h3>
+  <form method="post" action="/admin/users">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="grid">
+      <label>Username <input type="text" name="username" required></label>
+      <label>Display name <input type="text" name="display_name"></label>
+    </div>
+    <div class="grid">
+      <label>Role
+        <select name="role">
+          {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Initial password <input type="password" name="password" required minlength="10"></label>
+    </div>
+    <button type="submit">Create user</button>
+  </form>
+</article>
+{% endblock %}

@@ -1,0 +1,3 @@
+{{ chunk }}<div id="log-poller" hx-swap-oob="outerHTML"
+  {% if is_active %}hx-get="/fragments/runs/{{ run.id }}/log?offset={{ offset }}"
+  hx-trigger="every 2s" hx-target="#log-panel" hx-swap="beforeend"{% endif %}></div>

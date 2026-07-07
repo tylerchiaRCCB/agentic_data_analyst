@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ view.name }}{% endblock %}
+{% block content %}
+<header class="page-header">
+  <hgroup>
+    <h1>{{ view.name }}{% if view.is_archived %} <small class="muted">(archived)</small>{% endif %}</h1>
+    <p class="muted">{{ view.description }}</p>
+  </hgroup>
+  <div class="actions">
+    {% if user.role != 'viewer' %}
+    <a href="/runs/new?view={{ view.id }}" role="button">Run analysis</a>
+    {% endif %}
+    {% if user.role == 'admin' %}
+    <form method="post" action="/semantic-views/{{ view.id }}/archive" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary outline">{{ 'Unarchive' if view.is_archived else 'Archive' }}</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+
+{% if user.role != 'viewer' %}
+<details>
+  <summary role="button" class="secondary outline">Edit YAML</summary>
+  <form hx-post="/semantic-views/{{ view.id }}/versions" hx-target="#upload-result" hx-swap="innerHTML"
+        enctype="multipart/form-data">
+    <label>YAML <span class="muted">(saving creates a new version)</span>
+      <textarea name="yaml_text" rows="18" class="yaml-editor" spellcheck="false">{{ current_yaml }}</textarea>
+    </label>
+    <div class="grid">
+      <label>Change note
+        <input type="text" name="change_note" placeholder="What changed?">
+      </label>
+      <label>…or replace with an uploaded file
+        <input type="file" name="yaml_file" accept=".yaml,.yml,text/yaml">
+      </label>
+    </div>
+    <button type="submit">Validate &amp; save as v{{ (view.current_version.version_number + 1) if view.current_version else 1 }}</button>
+  </form>
+  <div id="upload-result"></div>
+</details>
+{% endif %}
+
+<h3>Versions</h3>
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Version</th><th>Uploaded</th><th>By</th><th>Note</th><th>Validation</th><th></th></tr></thead>
+  <tbody>
+  {% for ver in view.versions %}
+    <tr>
+      <td>v{{ ver.version_number }}{% if ver.id == view.current_version_id %} <strong>(current)</strong>{% endif %}</td>
+      <td class="muted">{{ ver.created_at | dt }}</td>
+      <td class="muted">{{ ver.creator.username if ver.creator else '—' }}</td>
+      <td class="muted">{{ ver.change_note }}</td>
+      <td>{% if ver.validation_status == 'valid' %}✓{% else %}⚠ {{ ver.validation_messages | join('; ') }}{% endif %}</td>
+      <td class="actions">
+        <a href="/semantic-views/{{ view.id }}/versions/{{ ver.id }}/download">Download</a>
+        {% if ver.id != view.current_version_id and user.role != 'viewer' %}
+        <form method="post" action="/semantic-views/{{ view.id }}/rollback/{{ ver.id }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">Make current</button>
+        </form>
+        {% endif %}
+        {% if view.current_version_id and ver.id != view.current_version_id %}
+        <button class="link-button"
+                hx-get="/fragments/semantic-views/{{ view.id }}/diff?old={{ ver.id }}&new={{ view.current_version_id }}"
+                hx-target="#diff-result" hx-swap="innerHTML">Diff vs current</button>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div id="diff-result"></div>
+
+{% if preview_html %}
+<h3>Current version preview</h3>
+<article class="yaml-preview">{{ preview_html | safe }}</article>
+{% endif %}
+{% endblock %}

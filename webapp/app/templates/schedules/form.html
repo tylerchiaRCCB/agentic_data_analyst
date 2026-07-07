@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if sched else 'New' }} Schedule{% endblock %}
+{% block content %}
+<h1>{{ 'Edit schedule' if sched else 'New schedule' }}</h1>
+<form method="post" action="{{ '/schedules/' ~ sched.id if sched else '/schedules' }}" class="form-narrow">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name
+    <input type="text" name="name" required value="{{ sched.name if sched else '' }}"
+           placeholder="e.g. Weekly revenue trends">
+  </label>
+  <label>Semantic view
+    <select name="semantic_view_id" required>
+      {% for v in views %}
+      <option value="{{ v.id }}" {% if sched and v.id == sched.semantic_view_id %}selected{% endif %}>{{ v.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Business question
+    <textarea name="question" rows="4" required>{{ sched.question if sched else '' }}</textarea>
+  </label>
+  <div class="grid">
+    <label>Cron expression
+      <input type="text" name="cron_expr" required value="{{ sched.cron_expr if sched else '0 8 * * 1' }}"
+             placeholder="min hour day month weekday"
+             hx-get="/fragments/schedules/preview" hx-target="#cron-preview"
+             hx-include="[name='cron_expr'],[name='timezone']"
+             hx-trigger="keyup changed delay:400ms, load">
+    </label>
+    <label>Timezone (IANA)
+      <input type="text" name="timezone" required value="{{ sched.timezone if sched else default_tz }}"
+             hx-get="/fragments/schedules/preview" hx-target="#cron-preview"
+             hx-include="[name='cron_expr'],[name='timezone']"
+             hx-trigger="keyup changed delay:400ms">
+    </label>
+    <label>If previous run still active
+      <select name="overlap_policy">
+        <option value="skip" {% if not sched or sched.overlap_policy == 'skip' %}selected{% endif %}>Skip this fire</option>
+        <option value="queue" {% if sched and sched.overlap_policy == 'queue' %}selected{% endif %}>Queue anyway</option>
+      </select>
+    </label>
+  </div>
+  <div id="cron-preview"></div>
+  <button type="submit">{{ 'Save changes' if sched else 'Create schedule' }}</button>
+</form>
+{% endblock %}

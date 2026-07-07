@@ -1,0 +1,4 @@
+<article class="diff-panel">
+{% for line in diff %}<span class="{% if line.kind == 'add' %}diff-add{% elif line.kind == 'del' %}diff-del{% endif %}">{{ line.text }}</span>
+{% else %}<span class="muted">No differences.</span>{% endfor %}
+</article>

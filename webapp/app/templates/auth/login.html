@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block bodyclass %}auth-page{% endblock %}
+{% block content %}
+<article class="auth-card">
+  <div class="auth-brand">
+    <span class="brand-mark">
+      <svg width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 13 6 8l3 3 5-7"/>
+      </svg>
+    </span>
+    <h1>Data Analyst</h1>
+    <p>Sign in to your workspace</p>
+  </div>
+  <form method="post" action="/login">
+    <label>Username
+      <input type="text" name="username" autocomplete="username" autofocus required>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+  </form>
+</article>
+{% endblock %}

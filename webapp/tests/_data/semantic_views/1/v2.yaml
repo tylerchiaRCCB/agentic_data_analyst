@@ -1,0 +1,4 @@
+name: sales_model
+tables:
+  - name: orders
+  - name: edited

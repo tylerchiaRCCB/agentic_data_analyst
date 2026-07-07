@@ -67,6 +67,12 @@ output/              · rendered recipient markdown per run
 runs/<run_id>/       · per-run artifacts, JSONL logs, span traces, lineage
 tests/               · 94+ tests; mock-SDK integration tests for orchestrator
 docs/                · architecture, walkthrough, quick-reference, examples
+webapp/              · self-contained web frontend (FastAPI + SQLite + htmx):
+                       accounts/roles, per-user semantic-view YAML management,
+                       runs with live logs, cron schedules. Own venv + tests +
+                       CLAUDE.md — read webapp/CLAUDE.md before touching it.
+                       adapters/agentic_pipeline.py bridges its worker contract
+                       to `python -m src.main`.
 ```
 
 ---

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+{% if user.role != 'viewer' %}
+<article class="ask-panel">
+  <h3>Ask a question</h3>
+  <form method="post" action="/runs">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="ask-row">
+      <select name="semantic_view_id" required>
+        {% for v in views %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
+      </select>
+      <input type="text" name="question" required placeholder="e.g. What drove the change in weekly active users last month?">
+      <button type="submit">Run analysis</button>
+    </div>
+  </form>
+  {% if not views %}<p class="muted">No semantic views yet — <a href="/semantic-views/new">create one</a> to get started.</p>{% endif %}
+</article>
+{% endif %}
+
+<div class="section-title">
+  <h3>Recent runs</h3>
+  <span class="muted">auto-refreshes</span>
+</div>
+<div hx-get="/fragments/dashboard/recent-runs" hx-trigger="every 10s" hx-swap="innerHTML">
+  {% with runs=recent_runs %}{% include "fragments/runs_table.html" %}{% endwith %}
+</div>
+
+<div class="section-title">
+  <h3>Upcoming scheduled runs</h3>
+</div>
+<div class="table-scroll">
+  <table>
+    <thead><tr><th>Schedule</th><th>Next fire</th><th>Semantic view</th></tr></thead>
+    <tbody>
+    {% for s in upcoming %}
+      <tr>
+        <td><a href="/schedules/{{ s.id }}">{{ s.name }}</a></td>
+        <td class="muted">{{ s.next_run_at | dt }}</td>
+        <td class="muted">{{ s.view.name }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">No enabled schedules.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

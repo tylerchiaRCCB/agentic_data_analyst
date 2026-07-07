@@ -1,0 +1,36 @@
+services:
+  migrate:
+    build: .
+    command: alembic upgrade head
+    volumes:
+      - appdata:/srv/app/data
+    env_file: .env
+
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - appdata:/srv/app/data
+    env_file: .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: python -m app.worker
+    volumes:
+      - appdata:/srv/app/data
+      # bind-mount the enclosing pipeline repo and set PIPELINE_REPO=/srv/pipeline
+      # (the pipeline needs its own deps available inside the container):
+      # - ..:/srv/pipeline:ro
+    env_file: .env   # carries Snowflake/Anthropic creds; web does not need them
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  appdata:

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Schedules{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Schedules</h1>
+  {% if user.role != 'viewer' %}<a href="/schedules/new" role="button">New schedule</a>{% endif %}
+</header>
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Name</th><th>Cron</th><th>Semantic view</th><th>Next fire</th><th>Last fired</th><th>Enabled</th></tr></thead>
+  <tbody>
+  {% for s in schedules %}
+    <tr>
+      <td><a href="/schedules/{{ s.id }}">{{ s.name }}</a></td>
+      <td><code>{{ s.cron_expr }}</code> <span class="muted">{{ s.timezone }}</span></td>
+      <td class="muted">{{ s.view.name }}</td>
+      <td class="muted">{{ s.next_run_at | dt if s.enabled else '—' }}</td>
+      <td class="muted">{{ s.last_run_at | dt }}</td>
+      <td>
+        {% if user.role != 'viewer' %}
+        <form method="post" action="/schedules/{{ s.id }}/toggle" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">{{ '✅ on' if s.enabled else '⏸ off' }}</button>
+        </form>
+        {% else %}{{ 'on' if s.enabled else 'off' }}{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No schedules yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

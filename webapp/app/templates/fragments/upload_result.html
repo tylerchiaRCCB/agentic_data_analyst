@@ -1,0 +1,11 @@
+{% if error %}
+<article class="flash flash-error">{{ error }}</article>
+{% else %}
+<article class="flash flash-success">
+  Saved as v{{ version.version_number }} and set as current.
+  {% if version.validation_status == 'warnings' %}
+  <br>⚠ Warnings: {{ version.validation_messages | join('; ') }}
+  {% endif %}
+  <br><a href="/semantic-views/{{ view.id }}">Reload page</a> to see it in the version list.
+</article>
+{% endif %}

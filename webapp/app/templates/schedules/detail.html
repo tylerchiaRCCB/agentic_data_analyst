@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ sched.name }}{% endblock %}
+{% block content %}
+<header class="page-header">
+  <hgroup>
+    <h1>{{ sched.name }} {% if not sched.enabled %}<small class="muted">(paused)</small>{% endif %}</h1>
+    <p class="muted">
+      <code>{{ sched.cron_expr }}</code> {{ sched.timezone }}
+      · {{ sched.view.name }}
+      · next fire {{ sched.next_run_at | dt if sched.enabled else '—' }}
+      · overlap: {{ sched.overlap_policy }}
+      · created by {{ sched.creator.username if sched.creator else '—' }}
+    </p>
+  </hgroup>
+  {% if can_edit %}
+  <div class="actions">
+    <a href="/schedules/{{ sched.id }}/edit" role="button" class="outline">Edit</a>
+    <form method="post" action="/schedules/{{ sched.id }}/run-now" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Run now</button>
+    </form>
+    <form method="post" action="/schedules/{{ sched.id }}/delete" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary outline">Delete</button>
+    </form>
+  </div>
+  {% endif %}
+</header>
+
+<blockquote>{{ sched.question }}</blockquote>
+
+<h3>Run history</h3>
+{% with runs=runs %}{% include "fragments/runs_table.html" %}{% endwith %}
+{% endblock %}

@@ -1,0 +1,19 @@
+<div class="table-scroll" id="runs-table">
+<table>
+  <thead><tr><th>Question</th><th>Semantic view</th><th>Status</th><th>Trigger</th><th>Created</th><th>Duration</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td><a href="/runs/{{ r.id }}">{{ r.question[:70] }}{% if r.question|length > 70 %}…{% endif %}</a></td>
+      <td class="muted">{{ r.view.name }} <small>v{{ r.version.version_number }}</small></td>
+      <td><span class="status-badge status-{{ r.status }}">{{ r.status }}</span></td>
+      <td class="muted">{% if r.schedule_id %}⏰ {{ r.schedule.name if r.schedule else 'schedule' }}{% else %}{{ r.user.username if r.user else '—' }}{% endif %}</td>
+      <td class="muted">{{ r.created_at | dt }}</td>
+      <td class="muted">{{ r.started_at | duration(r.finished_at) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No runs found.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

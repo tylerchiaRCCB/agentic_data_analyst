@@ -1,0 +1,6 @@
+<div id="run-status"
+     {% if is_active %}hx-get="/fragments/runs/{{ run.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <span class="status-badge status-{{ run.status }}">{{ run.status }}</span>
+  {% if run.status == 'running' %}<span class="muted"> · running for {{ run.started_at | duration(none) }}</span>{% endif %}
+  {% if run.error_summary %}<span class="muted"> · {{ run.error_summary }}</span>{% endif %}
+</div>

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Semantic Views{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h1>Semantic Views</h1>
+  {% if user.role != 'viewer' %}<a href="/semantic-views/new" role="button">New semantic view</a>{% endif %}
+</header>
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Name</th><th>Description</th>{% if user.role == 'admin' %}<th>Owner</th>{% endif %}<th>Current version</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {% for v in views %}
+    <tr>
+      <td><a href="/semantic-views/{{ v.id }}">{{ v.name }}</a>{% if v.is_archived %} <span class="muted">(archived)</span>{% endif %}</td>
+      <td class="muted">{{ v.description[:80] }}</td>
+      {% if user.role == 'admin' %}<td class="muted">{{ v.creator.username if v.creator else '—' }}</td>{% endif %}
+      <td>{% if v.current_version %}v{{ v.current_version.version_number }}{% else %}—{% endif %}</td>
+      <td class="muted">{{ v.created_at | dt }}</td>
+      <td>{% if v.current_version %}<a href="/semantic-views/{{ v.id }}/versions/{{ v.current_version.id }}/download">Download</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="{{ 6 if user.role == 'admin' else 5 }}" class="muted">No semantic views yet — <a href="/semantic-views/new">create your first one</a>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
