@@ -51,6 +51,73 @@ Read this section before changing retrieval, communication output, or webapp beh
 
 If a future change conflicts with any point above, flag it explicitly in your PR/commit message with rationale.
 
+## Recent implementation updates (2026-07-22)
+
+12. Output philosophy is now **problem-first** (no weather reports).
+  - Communication agent: visible output is problems only. Stable areas, structural observations, methodology all live in `<details>` audit trail.
+  - All 6 intermediate agents have output conciseness discipline sections — terse JSON, no paragraph-length narratives for clean passes.
+  - Question framer defaults to L3/L4 for proactive monitoring (diagnosis + prescription, not description).
+  - Proactive-action-card skill: root cause section must push beyond "what changed" to "why."
+
+13. Rolling-window question framing for scheduled runs.
+  - TARGET = most recent 1 complete week. BASELINE = prior 5 weeks.
+  - "ONLY report what CHANGED" — chronic/structural gaps go to audit trail, not visible output.
+  - This prevents 27-week pooled analysis from drowning out week-over-week signals.
+
+14. Claude Sonnet 5 backend added (`foundry-sonnet5`).
+  - `_KEY_NAMES["foundry-sonnet5"] = "raghu-sonnet-dev"` in `src/main.py`.
+  - All agents remapped to `claude-sonnet-5` when this backend is selected.
+  - Code execution confirmed working. Endpoint: `raghu-mpzq4rc5-eastus2`.
+  - Auth header: `x-api-key` (handled by AnthropicFoundry SDK).
+
+15. AML scheduled pipeline in `schedules/`.
+  - `walmart_opd_weekly.py`: matches team production pattern (Lina's maxerience template).
+  - Externalized config (`configs/config.json`): Azure workspace, compute, analysis params, Teams webhook.
+  - `Dockerfile` + `environment.yml` ready for shared compute (blocked on ACR auth currently — using tyler-large).
+  - Secrets pulled from AKV at submission time and injected as env vars (no KV access needed at runtime).
+  - Teams notification chained via `&&` after successful pipeline run.
+
+16. Teams notification delivery (`tools/notify_teams.py`).
+  - Extracts Executive Summary + Action Card bodies from communication agent artifact.
+  - Posts Adaptive Card to Power Automate webhook.
+  - Works end-to-end: run completes → Teams message appears automatically.
+
+17. Snowflake auth made environment-aware.
+  - `SnowflakeConfig.from_env()` now tries env vars first, falls back to Key Vault.
+  - `from_env()` supports base64-encoded DER private keys (for AML containers without KV access).
+  - Both call sites in `main.py` use try-env-then-KV pattern.
+
+18. Webapp backend selector.
+  - Dropdown on dashboard + `/runs/new` page: Default, Opus, Sonnet 5, Anthropic Direct.
+  - Selection written to `backend.txt` in run dir; worker reads it and sets `PIPELINE_BACKEND`.
+  - No DB migration needed.
+
+## Recent implementation updates (2026-07-23)
+
+19. Direct SQL data source added (`--source direct_sql`).
+  - Runs a fixed SQL query from `queries/<domain>.sql` directly against Snowflake.
+  - No Cortex Analyst, no row limits, ~10s execution, deterministic.
+  - `queries/walmart-opd-weekly-alsip.sql` pulls last 8 complete weeks from V_OPD_WEEKLY_ALSIP.
+  - Cortex Analyst path (`--source cortex_analyst`) preserved for exploratory domains.
+
+20. Daily Snowflake refresh in `scripts/refresh_walmart_standardized_data.sql`.
+  - Stored procedure + Snowflake task refreshing source data daily at 5am UTC.
+  - V_OPD_WEEKLY_ALSIP recommended as a view (not table) for always-fresh reads.
+
+21. Domain context refreshed for current schema.
+  - 47 columns (added FTPR_RATE, NIL_PICK_RATE, PRESUB_RATE, POSTSUB_RATE, TOTAL_*_DURATION_MINS).
+  - Category names updated (SPARKLING SOFT DRINKS, CORE SPARKLING, ADVANCED HYDRATION, ENERGY DRINKS, etc.).
+  - Data starts 2025-12-28. 46 stores, 642 UPCs, 15 categories.
+
+22. AML job artifacts copied to `./outputs/` for Studio visibility.
+
+23. Question framing hardened for scheduled runs.
+  - "ONLY report what CHANGED between TARGET and BASELINE."
+  - Baseline = prior 5 weeks only (not all history).
+  - Chronic/structural gaps explicitly excluded from visible output.
+
+---
+
 ## Recent implementation updates (2026-07-08)
 
 7. Binding directive enforces question adherence in `src/orchestrator/pipeline_executor.py`.

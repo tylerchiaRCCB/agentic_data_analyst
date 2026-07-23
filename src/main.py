@@ -98,9 +98,9 @@ def parse_args() -> CLIArgs:
     p.add_argument(
         "--source",
         type=str,
-        choices=["file", "cortex_analyst"],
+        choices=["file", "cortex_analyst", "direct_sql"],
         default="file",
-        help="Data source type. 'file' uses --data CSV/Excel. 'cortex_analyst' uses Snowflake Cortex Analyst.",
+        help="Data source type. 'file' uses --data CSV/Excel. 'cortex_analyst' uses Snowflake Cortex Analyst. 'direct_sql' runs a fixed SQL query from queries/<domain>.sql.",
     )
     p.add_argument(
         "--semantic-view",
@@ -188,6 +188,8 @@ def parse_args() -> CLIArgs:
             p.error("--scheduled requires --prompt-config.")
         if a.source == "cortex_analyst" and not a.semantic_view and not a.domain:
             p.error("--source=cortex_analyst requires --semantic-view or --domain.")
+        if a.source == "direct_sql" and not a.domain:
+            p.error("--source=direct_sql requires --domain (resolves to queries/<domain>.sql).")
         if a.source == "file" and not a.data:
             p.error("--source=file requires --data.")
     if a.prior_run_id and a.use_latest_run_context:
@@ -807,6 +809,60 @@ def main() -> int:
         tmp_csv = Path(tempfile.mktemp(suffix=".csv", prefix="cortex_"))
         response.dataframe.to_csv(tmp_csv, index=False)
         data_path = tmp_csv
+
+    elif args.source == "direct_sql":
+        # Run a fixed SQL query directly against Snowflake — no Cortex Analyst involved.
+        # SQL file lives at queries/<domain>.sql
+        from src.data_access.snowflake_client import SnowflakeClient, SnowflakeConfig
+        import tempfile
+        import pandas as pd
+
+        QUERIES_DIR = Path(__file__).resolve().parent.parent / "queries"
+        sql_file = QUERIES_DIR / f"{args.domain}.sql"
+        if not sql_file.exists():
+            run_logger.error(f"SQL file not found: {sql_file}")
+            return 3
+
+        sql = sql_file.read_text(encoding="utf-8")
+        run_logger.info("Direct SQL query loaded", sql_file=str(sql_file), sql_chars=len(sql))
+
+        with tracer.span("data_access.direct_sql"):
+            try:
+                sf_config = SnowflakeConfig.from_env()
+                logger.info("Loaded Snowflake config from environment variables")
+            except Exception:
+                sf_config = SnowflakeConfig.from_team_keyvault()
+                logger.info("Loaded Snowflake config from Azure Key Vault")
+            sf_client = SnowflakeClient(sf_config)
+
+            conn = sf_client.connect()
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            df = pd.DataFrame(rows, columns=columns)
+            cursor.close()
+
+            run_logger.info("Direct SQL returned data", rows=len(df), columns=len(df.columns))
+            lineage.add_statistic(
+                agent="direct-sql",
+                stage_index=0,
+                statistic={
+                    "action": "direct_sql_query",
+                    "sql_file": str(sql_file.name),
+                    "rows_returned": len(df),
+                    "columns": list(df.columns),
+                },
+            )
+
+        if df.empty:
+            run_logger.error("Direct SQL query returned no data. Cannot proceed.")
+            return 3
+
+        tmp_csv = Path(tempfile.mktemp(suffix=".csv", prefix="direct_sql_"))
+        df.to_csv(tmp_csv, index=False)
+        data_path = tmp_csv
+
     else:
         data_path = args.data
 

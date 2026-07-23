@@ -163,6 +163,74 @@ cd webapp
 .venv/bin/python -m app.worker
 ```
 
+## Recent changes (2026-07-22)
+
+Production-readiness sprint for Walmart OPD pilot:
+
+- **Output philosophy: problem-first, no weather reports**:
+  - All agent prompts refactored to surface anomalies/outliers/red flags only in visible output.
+  - Communication agent: Executive Summary restricted to problems only. "What's stable" and "Structural observations" moved to `<details>` audit trail.
+  - Added "Items Approaching Thresholds" section for near-miss metrics that may become next week's action cards.
+  - Question framer biased toward anomaly detection; defaults to L3/L4 for proactive runs.
+  - Added output conciseness discipline to 6 intermediate agents to reduce token cost (~30% output savings).
+
+- **Rolling-window analysis for scheduled runs**:
+  - Question framing: TARGET (latest 1 complete week) vs BASELINE (prior 5 weeks).
+  - Explicit instruction: "ONLY report what CHANGED — do NOT report chronic/structural gaps."
+  - Prevents the pipeline from describing known long-term issues as new findings.
+
+- **Claude Sonnet 5 backend** (`foundry-sonnet5`):
+  - New backend option using `raghu-sonnet-dev` AKV secret.
+  - All agents remapped to `claude-sonnet-5` when selected.
+  - Code execution confirmed working on the Sonnet 5 deployment.
+  - Webapp backend selector dropdown added (dashboard + new run page).
+
+- **AML scheduled pipeline** (`schedules/`):
+  - `walmart_opd_weekly.py`: Submit or schedule jobs matching team production patterns (Lina's maxerience template).
+  - `configs/config.json`: Externalized Azure, pipeline, analysis, and notification config.
+  - `Dockerfile` + `environment.yml`: Containerized environment for shared compute.
+  - `create_docker_image.py`: AML environment registration script.
+  - Secret injection at submission time (Anthropic + Snowflake private key from AKV).
+  - `.amlignore` updated to exclude `.venv/`, `runs/`, webapp data.
+
+- **Teams notifications** (`tools/notify_teams.py`):
+  - Posts Executive Summary + full Action Card bodies to Teams via Power Automate webhook.
+  - Adaptive Card format with status indicator (🔴/🟡/🟢).
+  - Chained into AML pipeline command — auto-posts on successful run.
+
+- **Snowflake auth flexibility**:
+  - `from_env()` now tries env vars first, falls back to Key Vault.
+  - Supports base64-encoded DER private keys (for containerized environments without KV access).
+
+- **Webapp enhancements**:
+  - Backend dropdown on dashboard + `/runs/new` (Opus, Sonnet 5, Anthropic Direct).
+  - Per-run backend override via `backend.txt` in run directory.
+  - Worker reads `backend.txt` and sets `PIPELINE_BACKEND` env var per job.
+
+## Recent changes (2026-07-23)
+
+- **Direct SQL data source** (`--source direct_sql`):
+  - New data source option that runs a fixed SQL query directly against Snowflake — no Cortex Analyst involved.
+  - SQL files live in `queries/<domain>.sql` (version-controlled, reviewable).
+  - Deterministic, no row limits, ~10s vs ~90s with Cortex.
+  - Cortex Analyst remains available via `--source cortex_analyst` for exploratory/new domains.
+
+- **Daily Snowflake refresh automation** (`scripts/refresh_walmart_standardized_data.sql`):
+  - Stored procedure + Snowflake task refreshing `WALMART_STANDARDIZED_EXTERNAL_DATA` daily at 5am UTC.
+  - V_OPD_WEEKLY_ALSIP can now be a view (always fresh) rather than a table requiring manual refresh.
+
+- **Domain context refreshed** (`context/domains/walmart-opd-weekly-alsip.md`):
+  - Updated to 47 columns (added pre-computed rate columns, total duration columns).
+  - Categories renamed: SSD → SPARKLING SOFT DRINKS + CORE SPARKLING; Isotonics → ADVANCED HYDRATION; etc.
+  - 46 stores, 642 UPCs, 60 brands, 15 categories. Data starts 2025-12-28.
+
+- **AML job outputs visible in Studio**:
+  - Run artifacts (`report.md`, `artifacts/*.json`) now copied to `./outputs/` for AML Studio visibility.
+
+- **Stronger TARGET vs BASELINE question framing**:
+  - "ONLY report what CHANGED" — explicit prohibition on surfacing chronic structural gaps.
+  - Baseline narrowed to prior 5 weeks (not all history) to prevent 27-week pooling.
+
 ## Recent changes (2026-07-08)
 
 - **Binding directive enforces question adherence** in [src/orchestrator/pipeline_executor.py](src/orchestrator/pipeline_executor.py):

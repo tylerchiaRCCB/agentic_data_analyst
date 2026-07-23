@@ -139,12 +139,15 @@ logger.info(f"Workspace: {workspace_name}")
 # ==============================================================================
 
 # Build the command that runs the analysis pipeline + Teams notification
+# AML captures stdout/stderr in user_logs/std_log.txt automatically.
+# We also copy the run artifacts to AML's outputs/ folder so they're visible in Studio.
 run_command = (
     f"python -m src.main "
     f"--backend {backend} "
     f"--domain {domain} "
     f"--source {source} "
-    f'--question "{question}"'
+    f'--question "{question}" '
+    f'&& cp -r runs/$(ls -1t runs/ | head -1)/* ./outputs/ '
 )
 
 # Chain Teams notification after successful pipeline run

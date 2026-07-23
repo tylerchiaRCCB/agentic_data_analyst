@@ -41,7 +41,7 @@
     "analysis": {
         "domain": "walmart-opd-weekly-alsip",
         "backend": "foundry-sonnet5",
-        "source": "cortex_analyst",
+        "source": "direct_sql",
         "question": "IMPORTANT: Split the data into two groups: TARGET = the single most recent complete week (DAYS_IN_WEEK=7). BASELINE = the prior 5 complete weeks only (NOT all history). ONLY report findings about what CHANGED between TARGET and BASELINE. Do NOT report chronic/structural gaps that have been present for the entire data window. If a store has been underperforming for all weeks in the dataset, that is NOT a finding — put it in the audit trail only. The question is: What got WORSE this week compared to the recent 5-week norm? Which stores, categories, or SKUs degraded in FTPR or nil-pick rate? Why did they degrade? What specific fix should the DC ops team execute THIS WEEK? Also flag any SKUs that crossed below 80% FTPR in the TARGET week for the first time."
     },
     "notification": {
