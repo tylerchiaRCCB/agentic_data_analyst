@@ -72,6 +72,7 @@ class SemanticView(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
+    snowflake_ref: Mapped[str] = mapped_column(String(256), default="")  # e.g. DB.SCHEMA.SEMANTIC_VIEW
     current_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("semantic_view_versions.id", use_alter=True), nullable=True
     )

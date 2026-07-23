@@ -1,0 +1,378 @@
+name: walmart_opd_weekly_alsip
+description: |-
+  Walmart OPD in-stock execution data for the Alsip distribution center, pre-joined
+  and aggregated to product-store-week grain. Includes product attribution (PPG, brand,
+  category) and store/DC attribution from RCCB bridge views.
+
+  This is a single flat table — all joins are pre-resolved. Use for analysis of
+  in-stock performance drivers, nil pick patterns, and operational improvement
+  opportunities within the Alsip DC footprint.
+
+  Grain: product (CORE_UPC_10) by store (STORE_NBR) by week (WEEK_START).
+  Row count is manageable (~200K-500K for a single DC).
+
+  IMPORTANT — rate computation rules:
+  - Always compute FTPR as SUM(FTPR_NMRTR) / SUM(FTPR_DNMNTR). Never average
+    pre-computed FTPR_RATE values across groups.
+  - Same pattern for nil_pick_rate, presub_rate, postsub_rate.
+  - The pre-computed rate columns (FTPR_RATE, NIL_PICK_RATE, etc.) are for
+    display convenience only.
+
+tables:
+- name: opd_weekly
+  description: |-
+    Weekly OPD performance at product-store-week grain for the Alsip DC. Pre-filtered
+    to 2025+ data, sentinel store 9999 excluded, INNER JOINed to V_UPC_PRODUCT
+    to filter out unmatched UPCs with corrupt nil pick values.
+  base_table:
+    database: CCB_DATASCIENCE_DEV
+    schema: WALMART_OPD
+    table: V_OPD_WEEKLY_ALSIP
+
+  dimensions:
+  - name: store_nbr
+    description: Walmart store number.
+    expr: STORE_NBR
+    data_type: NUMBER
+    synonyms: [store, store number, location]
+
+  - name: customer_desc
+    description: Full customer description (e.g. WALMART SUPERCENTER #1234).
+    expr: CUSTOMER_DESC
+    data_type: TEXT
+    synonyms: [customer, store name]
+
+  - name: distribution_center_desc
+    description: RCCB distribution center serving this store.
+    expr: DISTRIBUTION_CENTER_DESC
+    data_type: TEXT
+    synonyms: [dc, distribution center, warehouse]
+
+  - name: core_upc_10
+    description: 10-digit core UPC product identifier.
+    expr: CORE_UPC_10
+    data_type: TEXT
+    synonyms: [upc, product code]
+
+  - name: product_id
+    description: RCCB product (material) ID.
+    expr: PRODUCT_ID
+    data_type: TEXT
+    synonyms: [material id, sku]
+
+  - name: product_desc
+    description: RCCB product description.
+    expr: PRODUCT_DESC
+    data_type: TEXT
+    synonyms: [product name, material description]
+
+  - name: ppg
+    description: Promoted Package Group — groups related products for analysis.
+    expr: PPG
+    data_type: TEXT
+    synonyms: [promoted package group, package group, promo group]
+
+  - name: brand
+    description: Product brand name. Use ILIKE for filtering (mixed case values).
+    expr: BRAND
+    data_type: TEXT
+    synonyms: [brand name, product brand]
+
+  - name: category
+    description: Product category (e.g. SSD, ENERGY, Water).
+    expr: CATEGORY
+    data_type: TEXT
+    synonyms: [product category, beverage category]
+
+  - name: flavor
+    description: Product flavor variant.
+    expr: FLAVOR
+    data_type: TEXT
+
+  - name: size
+    description: Package size descriptor (e.g. 12 OZ, 20 OZ, 12PK 12OZ).
+    expr: SIZE
+    data_type: TEXT
+    synonyms: [package size, pack size]
+
+  - name: original_item_desc
+    description: Full product description from Walmart.
+    expr: ORIGINAL_ITEM_DESC
+    data_type: TEXT
+    synonyms: [item description, product name]
+
+  - name: managedby_sid
+    description: Territory/management hierarchy key.
+    expr: MANAGEDBY_SID
+    data_type: NUMBER
+
+  time_dimensions:
+  - name: week_start
+    description: First day of the week (Monday). Use for trending and date filtering.
+    expr: WEEK_START
+    data_type: DATE
+    synonyms: [week, week start date, promo week]
+
+  measures:
+  - name: ftpr_nmrtr
+    description: FTPR numerator — successful first-time picks.
+    expr: SUM(FTPR_NMRTR)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [ftpr numerator, successful picks]
+
+  - name: ftpr_dnmntr
+    description: FTPR denominator — total pick attempts.
+    expr: SUM(FTPR_DNMNTR)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [ftpr denominator, total picks]
+
+  - name: ftpr_qty
+    description: First time pick quantity (units).
+    expr: SUM(FTPR_QTY)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: nil_pick_qty
+    description: Total nil-pick quantity — items that could not be picked.
+    expr: SUM(NIL_PICK_QTY)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [nil picks, missed picks]
+
+  - name: nil_pick_count
+    description: Count of nil-pick events.
+    expr: SUM(NIL_PICK_COUNT)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: presub_qty
+    description: Pre-substitution quantity.
+    expr: SUM(PRESUB_QTY)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: presub_rate_nmrtr
+    description: Pre-substitution rate numerator.
+    expr: SUM(PRESUB_RATE_NMRTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: presub_rate_dnmntr
+    description: Pre-substitution rate denominator.
+    expr: SUM(PRESUB_RATE_DNMNTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: postsub_rate_nmrtr
+    description: Post-substitution rate numerator.
+    expr: SUM(POSTSUB_RATE_NMRTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: postsub_rate_dnmntr
+    description: Post-substitution rate denominator.
+    expr: SUM(POSTSUB_RATE_DNMNTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: schdl_nil_pick_qty
+    description: Scheduled nil-pick quantity.
+    expr: SUM(SCHDL_NIL_PICK_QTY)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [scheduled nil picks]
+
+  - name: schdl_nil_pick_rate_nmrtr
+    description: Scheduled nil-pick rate numerator.
+    expr: SUM(SCHDL_NIL_PICK_RATE_NMRTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: schdl_nil_pick_rate_dnmntr
+    description: Scheduled nil-pick rate denominator.
+    expr: SUM(SCHDL_NIL_PICK_RATE_DNMNTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: unschdl_nil_pick_qty
+    description: Unscheduled nil-pick quantity.
+    expr: SUM(UNSCHDL_NIL_PICK_QTY)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [unscheduled nil picks]
+
+  - name: unschdl_nil_pick_rate_nmrtr
+    description: Unscheduled nil-pick rate numerator.
+    expr: SUM(UNSCHDL_NIL_PICK_RATE_NMRTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: unschdl_nil_pick_rate_dnmntr
+    description: Unscheduled nil-pick rate denominator.
+    expr: SUM(UNSCHDL_NIL_PICK_RATE_DNMNTR)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: days_in_week
+    description: Number of days with data in this week (for partial-week detection).
+    expr: SUM(DAYS_IN_WEEK)
+    data_type: NUMBER
+    default_aggregation: sum
+
+  - name: ftpr_rate
+    description: |-
+      First Time Pick Rate = SUM(FTPR_NMRTR) / SUM(FTPR_DNMNTR). Always recompute
+      from numerator/denominator sums. Target >= 95%.
+    expr: SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0)
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms: [ftpr, first time pick rate, pick rate, fill rate]
+
+  - name: nil_pick_rate
+    description: |-
+      Nil Pick Rate = SUM(SCHDL_NIL_PICK_RATE_NMRTR) / SUM(SCHDL_NIL_PICK_RATE_DNMNTR).
+    expr: SUM(SCHDL_NIL_PICK_RATE_NMRTR) / NULLIF(SUM(SCHDL_NIL_PICK_RATE_DNMNTR), 0)
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms: [nil rate, miss rate]
+
+  # -- Delivery columns (pre-joined from GreenMile F_STOP ROLE='DC') --
+
+  - name: delivery_stop_count
+    description: Number of DC delivery stops at this store this week. 0 = no delivery.
+    expr: SUM(DELIVERY_STOP_COUNT)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [delivery count, delivery frequency, deliveries]
+
+  - name: avg_delivery_duration_mins
+    description: Average delivery stop duration in minutes for this store-week.
+    expr: AVG(AVG_DELIVERY_DURATION_MINS)
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms: [delivery time, delivery duration]
+
+  - name: is_delivery_active_week
+    description: 1 if at least one delivery happened at this store this week, 0 otherwise.
+    expr: MAX(IS_DELIVERY_ACTIVE_WEEK)
+    data_type: NUMBER
+    default_aggregation: max
+    synonyms: [delivery active, had delivery]
+
+  # -- Merch columns (pre-joined from GreenMile F_STOP ROLE LIKE '%MERCH%') --
+
+  - name: merch_visit_count
+    description: Number of merchandising visits at this store this week. 0 = no merch.
+    expr: SUM(MERCH_VISIT_COUNT)
+    data_type: NUMBER
+    default_aggregation: sum
+    synonyms: [merch count, merch frequency, merch visits]
+
+  - name: avg_merch_duration_mins
+    description: Average merchandising visit duration in minutes for this store-week.
+    expr: AVG(AVG_MERCH_DURATION_MINS)
+    data_type: NUMBER
+    default_aggregation: avg
+    synonyms: [merch time, merch duration, time in store]
+
+  - name: is_merch_active_week
+    description: 1 if at least one merch visit happened at this store this week, 0 otherwise.
+    expr: MAX(IS_MERCH_ACTIVE_WEEK)
+    data_type: NUMBER
+    default_aggregation: max
+    synonyms: [merch active, had merch visit]
+
+verified_queries:
+  - name: overall_ftpr_alsip
+    question: What is the overall FTPR for Alsip?
+    sql: |-
+      SELECT
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(FTPR_DNMNTR) AS total_picks
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+    use_as_onboarding_question: true
+
+  - name: weekly_ftpr_trend_alsip
+    question: What is the weekly FTPR trend?
+    sql: |-
+      SELECT
+        WEEK_START,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(FTPR_DNMNTR) AS total_picks
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY WEEK_START
+      ORDER BY WEEK_START
+
+  - name: ftpr_by_category_alsip
+    question: Which categories have the worst FTPR?
+    sql: |-
+      SELECT
+        CATEGORY,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(FTPR_DNMNTR) AS total_picks,
+        SUM(NIL_PICK_QTY) AS nil_pick_qty
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY CATEGORY
+      HAVING SUM(FTPR_DNMNTR) > 100
+      ORDER BY ftpr_rate ASC
+
+  - name: worst_stores_alsip
+    question: Which stores have the worst FTPR?
+    sql: |-
+      SELECT
+        STORE_NBR,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(FTPR_DNMNTR) AS total_picks,
+        SUM(NIL_PICK_QTY) AS nil_pick_qty
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY STORE_NBR
+      HAVING SUM(FTPR_DNMNTR) > 500
+      ORDER BY ftpr_rate ASC
+      LIMIT 20
+
+  - name: ftpr_by_ppg_alsip
+    question: What is the FTPR by promoted package group?
+    sql: |-
+      SELECT
+        PPG,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(FTPR_DNMNTR) AS total_picks
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY PPG
+      HAVING SUM(FTPR_DNMNTR) > 500
+      ORDER BY ftpr_rate ASC
+
+  - name: delivery_vs_ftpr_alsip
+    question: Is there a relationship between delivery activity and FTPR?
+    sql: |-
+      SELECT
+        STORE_NBR,
+        WEEK_START,
+        SUM(FTPR_NMRTR) AS ftpr_nmrtr,
+        SUM(FTPR_DNMNTR) AS ftpr_dnmntr,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(NIL_PICK_QTY) AS nil_pick_qty,
+        SUM(DELIVERY_STOP_COUNT) AS delivery_stop_count,
+        MAX(IS_DELIVERY_ACTIVE_WEEK) AS is_delivery_active_week
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY STORE_NBR, WEEK_START
+      ORDER BY STORE_NBR, WEEK_START
+    use_as_onboarding_question: true
+
+  - name: merch_vs_ftpr_alsip
+    question: Do stores with more merch visits have better FTPR?
+    sql: |-
+      SELECT
+        STORE_NBR,
+        WEEK_START,
+        SUM(FTPR_NMRTR) AS ftpr_nmrtr,
+        SUM(FTPR_DNMNTR) AS ftpr_dnmntr,
+        SUM(FTPR_NMRTR) / NULLIF(SUM(FTPR_DNMNTR), 0) AS ftpr_rate,
+        SUM(NIL_PICK_QTY) AS nil_pick_qty,
+        SUM(MERCH_VISIT_COUNT) AS merch_visit_count,
+        MAX(IS_MERCH_ACTIVE_WEEK) AS is_merch_active_week
+      FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+      GROUP BY STORE_NBR, WEEK_START
+      ORDER BY STORE_NBR, WEEK_START

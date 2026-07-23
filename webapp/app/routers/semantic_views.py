@@ -15,6 +15,12 @@ from app.services.semantic_views import (
     unified_diff_html,
     validate_yaml,
 )
+from app.services.repo_sync import (
+    read_domain_doc,
+    save_domain_doc,
+    save_yaml_to_repo,
+    sync_repo_to_db,
+)
 from app.templating import render
 
 router = APIRouter()
@@ -23,7 +29,7 @@ router = APIRouter()
 def _get_view(db: DbSession, view_id: int, user: User) -> SemanticView:
     """Semantic views are per-user: only the owner (or an admin) can see one."""
     view = db.get(SemanticView, view_id)
-    if view is None or not can_manage(user, view.created_by):
+    if view is None or (view.created_by is not None and not can_manage(user, view.created_by)):
         raise HTTPException(status_code=404)
     return view
 
@@ -49,9 +55,12 @@ def list_views(
     user: User = Depends(require_role("viewer")),
     db: DbSession = Depends(get_db),
 ):
+    sync_repo_to_db(db)
     q = select(SemanticView).order_by(SemanticView.name)
     if user.role != "admin":
-        q = q.where(SemanticView.created_by == user.id)
+        q = q.where(
+            (SemanticView.created_by == user.id) | (SemanticView.created_by.is_(None))
+        )
     views = db.scalars(q).all()
     return render(request, "semantic_views/list.html", views=views)
 
@@ -96,6 +105,8 @@ async def create_view(
 def view_detail(
     request: Request,
     view_id: int,
+    flash: str = "",
+    kind: str = "info",
     user: User = Depends(require_role("viewer")),
     db: DbSession = Depends(get_db),
 ):
@@ -106,8 +117,11 @@ def view_detail(
         raw = read_version_bytes(view.current_version)
         preview_html = highlight_yaml(raw)
         current_yaml = raw.decode("utf-8", errors="replace")
+    domain_doc = read_domain_doc(view.name)
     return render(request, "semantic_views/detail.html", view=view,
-                  preview_html=preview_html, current_yaml=current_yaml)
+                  preview_html=preview_html, current_yaml=current_yaml,
+                  domain_doc=domain_doc,
+                  flash=flash or None, flash_kind=kind)
 
 
 @router.post("/semantic-views/{view_id}/versions", dependencies=[Depends(verify_csrf)])
@@ -124,6 +138,7 @@ async def upload_version(
     try:
         raw = await _read_yaml_input(yaml_file, yaml_text)
         version = add_version(db, view, raw, change_note, user)
+        save_yaml_to_repo(view.name, raw)
     except YamlValidationError as e:
         return render(request, "fragments/upload_result.html", status_code=400,
                       error=str(e), version=None)
@@ -194,3 +209,16 @@ def diff_fragment(
         f"v{new_v.version_number}",
     )
     return render(request, "fragments/diff.html", diff=diff)
+
+
+@router.post("/semantic-views/{view_id}/domain-doc", dependencies=[Depends(verify_csrf)])
+async def save_domain_doc_route(
+    request: Request,
+    view_id: int,
+    domain_doc_text: str = Form(""),
+    user: User = Depends(require_role("analyst")),
+    db: DbSession = Depends(get_db),
+):
+    view = _get_view(db, view_id, user)
+    save_domain_doc(view.name, domain_doc_text)
+    return RedirectResponse(f"/semantic-views/{view.id}", status_code=303)

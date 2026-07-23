@@ -114,6 +114,82 @@ webapp/                    Self-contained web frontend (FastAPI + SQLite): accou
 
 Detailed layout — including the specific markdown and Python files that will populate each directory — is in Part 2 of [mvp_plan.md](mvp_plan.md).
 
+## Recent changes (2026-07-07)
+
+The following updates were implemented during the latest stabilization pass across pipeline + webapp:
+
+- **Cortex retrieval hardened for full-context analysis** in [src/data_access/cortex_analyst_client.py](src/data_access/cortex_analyst_client.py):
+  - Added semantic-model-driven retrieval prompt construction so Cortex is asked to return a full, analysis-ready dataset at model grain instead of over-aggregated answer tables.
+  - Added stronger schema-driven missing-column warnings when expected dimensions/measures are absent from returned data.
+  - Kept TPO-targeted guardrails/warnings and wired them into the broader schema-aware checks.
+
+- **Profiler schema validation made more robust** in [src/orchestrator/schemas.py](src/orchestrator/schemas.py):
+  - Relaxed `DataProfilerPayload.completeness` typing to accept structured maps plus `_notes` string entries surfaced by real runs.
+
+- **Communication output simplified for non-technical stakeholders**:
+  - Updated [agents/communication-agent.md](agents/communication-agent.md), [skills/output/proactive-action-card.md](skills/output/proactive-action-card.md), [skills/output/descriptive-summary-format.md](skills/output/descriptive-summary-format.md), and [skills/output/stakeholder-communication.md](skills/output/stakeholder-communication.md) to reduce jargon and emphasize clear actions and plain-language caveats.
+
+- **Webapp now edits repo semantic assets directly (no parallel semantic layer)**:
+  - Added repo sync/save helpers in [webapp/app/services/repo_sync.py](webapp/app/services/repo_sync.py).
+  - Updated semantic/runs/dashboard routers to auto-import repo semantic models and save edits back to repo files:
+    - [webapp/app/routers/semantic_views.py](webapp/app/routers/semantic_views.py)
+    - [webapp/app/routers/runs.py](webapp/app/routers/runs.py)
+    - [webapp/app/routers/dashboard.py](webapp/app/routers/dashboard.py)
+  - Added domain document editing in [webapp/app/templates/semantic_views/detail.html](webapp/app/templates/semantic_views/detail.html).
+
+- **Webapp execution and UX fixes**:
+  - Worker now loads required non-`ANALYST_` `.env` values in [webapp/app/worker/loop.py](webapp/app/worker/loop.py) so backend routing (for example `PIPELINE_*`) is consistent.
+  - Added missing run pages:
+    - [webapp/app/templates/runs/list.html](webapp/app/templates/runs/list.html)
+    - [webapp/app/templates/runs/new.html](webapp/app/templates/runs/new.html)
+    - [webapp/app/templates/runs/detail.html](webapp/app/templates/runs/detail.html)
+    - [webapp/app/templates/runs/report.html](webapp/app/templates/runs/report.html)
+  - Reduced noisy/repeated logging in run views and dashboard log polling.
+  - Enabled Mermaid rendering and HTML `<details>` block rendering in reports via:
+    - [webapp/app/services/markdown.py](webapp/app/services/markdown.py)
+    - [webapp/app/templates/base.html](webapp/app/templates/base.html)
+    - [webapp/app/static/app.js](webapp/app/static/app.js)
+    - [webapp/app/static/vendor/mermaid.min.js](webapp/app/static/vendor/mermaid.min.js)
+
+- **Run validation milestones**:
+  - Confirmed successful end-to-end analytical run against semantic view `CCB_DATASCIENCE_DEV.TPO_ANAPLAN_ANALYSIS.TPO_INSIGHTS` after correcting semantic object targeting.
+  - Confirmed communication-only replay flow works for low-cost output iteration.
+
+- **Operational note for local dev**:
+  - `uvicorn --reload` picks up API code changes, but the worker must be running to execute jobs. If the worker exits, restart it with:
+
+```bash
+cd webapp
+.venv/bin/python -m app.worker
+```
+
+## Recent changes (2026-07-08)
+
+- **Binding directive enforces question adherence** in [src/orchestrator/pipeline_executor.py](src/orchestrator/pipeline_executor.py):
+  - Downstream agents now receive an explicit BINDING DIRECTIVE extracted from the Question Framer's output, placed at the top of their user message.
+  - The directive includes the user's analytical questions, mandatory data filters (applied before analysis), primary grouping key, success criteria, and decision context.
+  - Rules enforce: all findings must answer the question, no generic exploratory analysis unless asked, mandatory data filters must be applied to the dataframe before any computation.
+
+- **Inline YAML is now the default Cortex Analyst path**:
+  - The webapp sends semantic model YAML inline to Cortex Analyst instead of requiring a deployed Snowflake semantic view.
+  - No `semantic_view:` or `domain:` keys are injected into the YAML — it stays clean and deployable.
+  - Domain name and optional Snowflake ref are passed via `domain.txt` side-channel.
+  - The adapter strips non-Cortex keys before writing YAML to the repo path.
+
+- **Postgres support added** for the webapp database:
+  - `webapp/app/db.py` now detects SQLite vs Postgres and applies pragmas only for SQLite.
+  - Set `ANALYST_DATABASE_URL=postgresql://user@host/db` in `.env` to use Postgres.
+  - `psycopg2-binary` added to `webapp/requirements.txt`.
+
+- **UI improvements**:
+  - Forms centered on new/create pages.
+  - Profile dropdown fixed (Pico CSS override for `<details>` chevron and spacing).
+  - Report tables render correctly (removed `display: block` that collapsed table layout).
+  - Runs list paginated at 10 per page with prev/next navigation.
+  - Run logs collapsible — collapsed by default for finished runs, open while active.
+
+- **Semantic model fields added** (`purchase_quantity`, `free_quantity`, `save_quantity`) to TPO domain YAML and context doc for structured must-buy analysis.
+
 ## Build status
 
 System definition is complete:

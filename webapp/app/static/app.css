@@ -130,6 +130,7 @@ h4 { font-size: 0.95rem; }
 main.container {
   width: 100%;
   max-width: 72rem;
+  margin: 0 auto;
   padding: 1.75rem 1.25rem 4rem;
   flex: 1;
 }
@@ -226,6 +227,7 @@ code {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  flex: none;
 }
 
 .icon-button {
@@ -257,7 +259,7 @@ html[data-theme="light"] .icon-moon { display: none; }
 html[data-theme="light"] .icon-sun { display: block; }
 
 /* ---------- user menu ---------- */
-.user-menu { position: relative; margin: 0; }
+.user-menu { position: relative; margin: 0; flex: none; border: none; }
 .user-menu > summary {
   list-style: none;
   cursor: pointer;
@@ -271,12 +273,18 @@ html[data-theme="light"] .icon-sun { display: block; }
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--text);
+  white-space: nowrap;
+  line-height: 1.4;
   transition: border-color 0.12s ease, background-color 0.12s ease;
 }
+/* Override Pico's injected chevron and spacing on details/summary */
+.user-menu > summary::after { display: none !important; content: none !important; float: none !important; }
+.user-menu > summary::before { display: none !important; content: none !important; }
+.user-menu > summary::marker { display: none; }
 .user-menu > summary::-webkit-details-marker { display: none; }
-.user-menu > summary::after { display: none; }
+.user-menu[open] > summary { margin-bottom: 0; }
 .user-menu > summary:hover { border-color: var(--border-strong); }
-.user-menu[open] > summary { border-color: var(--accent); }
+.user-menu[open] > summary { border-color: var(--accent); margin-bottom: 0; }
 
 .avatar {
   width: 1.55rem;
@@ -306,14 +314,18 @@ html[data-theme="light"] .icon-sun { display: block; }
   border-radius: 12px;
   box-shadow: var(--shadow-pop);
   z-index: 60;
+  display: block;
+  flex-direction: column;
 }
 .user-menu .menu li { margin: 0; padding: 0; list-style: none; }
+.user-menu .menu li form { margin: 0; padding: 0; }
 .user-menu .menu .menu-label {
   padding: 0.4rem 0.7rem 0.5rem;
   font-size: 0.75rem;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.3rem;
+  white-space: nowrap;
 }
 .user-menu .menu a,
 .user-menu .menu .link-button {
@@ -324,8 +336,14 @@ html[data-theme="light"] .icon-sun { display: block; }
   border-radius: 8px;
   color: var(--text);
   font-size: 0.88rem;
+  font-weight: 500;
   text-decoration: none;
   background: none;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  line-height: 1.4;
+  cursor: pointer;
 }
 .user-menu .menu a:hover,
 .user-menu .menu .link-button:hover {
@@ -567,9 +585,22 @@ details > summary { cursor: pointer; }
 .yaml-preview pre { margin: 0; background: transparent; }
 
 .report-body img { max-width: 100%; border-radius: 8px; }
-.report-body table { display: block; overflow-x: auto; box-shadow: none; }
+.report-body table { width: 100%; box-shadow: none; table-layout: auto; overflow-wrap: break-word; }
+.report-body .table-scroll { overflow-x: auto; }
+.report-body pre.mermaid { display: flex; justify-content: center; background: transparent; border: none; padding: 1.5rem 0; margin: 1.5rem 0; overflow: visible; min-height: 300px; }
+.report-body pre.mermaid svg { overflow: visible; max-width: 100%; height: auto; }
 .report-body h1, .report-body h2 { margin-top: 1.5rem; }
 .report-body h1:first-child, .report-body h2:first-child { margin-top: 0; }
+
+/* ---------- pagination ---------- */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+.pagination [role="button"] { font-size: 0.85rem; padding: 0.4rem 0.9rem; margin: 0; }
 
 .diff-panel {
   font-family: var(--pico-font-family-monospace);
@@ -666,8 +697,8 @@ html[data-theme="dark"] .highlight .l, html[data-theme="dark"] .highlight .m { c
 .muted { color: var(--text-muted); font-size: 0.85rem; }
 td .status-badge { vertical-align: middle; }
 .compact-select { margin: 0; padding: 0.2rem 2rem 0.2rem 0.5rem; width: auto; font-size: 0.85rem; }
-.form-narrow { max-width: 44rem; }
-.card-narrow { max-width: 32rem; }
+.form-narrow { max-width: 44rem; margin: 0 auto; }
+.card-narrow { max-width: 32rem; margin: 0 auto; }
 
 blockquote {
   background: var(--surface);

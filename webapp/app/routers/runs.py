@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.config import settings
@@ -36,7 +36,9 @@ def _active_views(db: DbSession, user: User) -> list[SemanticView]:
         .order_by(SemanticView.name)
     )
     if user.role != "admin":
-        q = q.where(SemanticView.created_by == user.id)
+        q = q.where(
+            (SemanticView.created_by == user.id) | (SemanticView.created_by.is_(None))
+        )
     return db.scalars(q).all()
 
 
@@ -45,17 +47,24 @@ def list_runs(
     request: Request,
     status: str = "",
     view: int | None = None,
+    page: int = 1,
     user: User = Depends(require_role("viewer")),
     db: DbSession = Depends(get_db),
 ):
-    q = select(Run).order_by(Run.created_at.desc()).limit(100)
+    per_page = 10
+    if page < 1:
+        page = 1
+    q_base = select(Run)
     if status in RUN_STATUSES:
-        q = q.where(Run.status == status)
+        q_base = q_base.where(Run.status == status)
     if view:
-        q = q.where(Run.semantic_view_id == view)
-    runs = db.scalars(q).all()
+        q_base = q_base.where(Run.semantic_view_id == view)
+    total = db.scalar(select(func.count()).select_from(q_base.subquery()))
+    runs = db.scalars(q_base.order_by(Run.created_at.desc()).limit(per_page).offset((page - 1) * per_page)).all()
+    total_pages = max(1, (total + per_page - 1) // per_page)
     ctx = dict(runs=runs, views=_active_views(db, user), statuses=RUN_STATUSES,
-               sel_status=status, sel_view=view)
+               sel_status=status, sel_view=view,
+               page=page, total_pages=total_pages)
     if request.headers.get("HX-Request"):
         return render(request, "fragments/runs_table.html", **ctx)
     return render(request, "runs/list.html", **ctx)
@@ -76,17 +85,18 @@ def create_run(
     request: Request,
     question: str = Form(...),
     semantic_view_id: int = Form(...),
+    backend: str = Form(""),
     user: User = Depends(require_role("analyst")),
     db: DbSession = Depends(get_db),
 ):
     view = db.get(SemanticView, semantic_view_id)
     if view is None or view.is_archived or view.current_version is None \
-            or not can_manage(user, view.created_by):
+            or (view.created_by is not None and not can_manage(user, view.created_by)):
         raise HTTPException(status_code=400, detail="Invalid semantic view")
     if not question.strip():
         return render(request, "runs/new.html", status_code=400, views=_active_views(db, user),
                       sel_view=semantic_view_id, flash="Question is required.", flash_kind="error")
-    run = enqueue_run(db, question, view, view.current_version, user=user)
+    run = enqueue_run(db, question, view, view.current_version, user=user, backend=backend)
     return RedirectResponse(f"/runs/{run.id}", status_code=303)
 
 

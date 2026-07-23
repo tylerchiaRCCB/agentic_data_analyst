@@ -10,8 +10,24 @@ import signal
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import delete, select
+
+# Load .env so PIPELINE_* vars are available in os.environ for forwarding
+_env_file = Path(__file__).resolve().parents[2] / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key and key not in os.environ:
+            # Strip inline comments (e.g. 'value  # comment')
+            if '  #' in value:
+                value = value[:value.index('  #')]
+            os.environ[key] = value.strip()
 
 from app.config import settings
 from app.db import SessionLocal

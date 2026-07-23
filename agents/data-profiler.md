@@ -66,6 +66,16 @@ In contextless mode:
 - Be especially conservative on `readiness_assessment` — when in doubt, `READY_WITH_CAVEATS` and surface the missing context as a caveat tied to specific limitations (e.g., *"baseline established from trailing 13 weeks of in-sample data; no external comparison available without domain context"*).
 - Note when you've had to infer rather than reference a definition. Inferences are not authoritative.
 
+## Output conciseness discipline
+
+Your artifact is the foundation for all downstream agents. Be thorough in computation but terse in output:
+
+- **`statistics` array:** Include only baselines and distributional summaries that downstream agents will reference (medians, IQRs, null rates, grain counts). Do not emit per-column histograms or exhaustive percentile breakdowns.
+- **`data_integrity_risks`:** One sentence per risk. State the risk, the affected scope, and the recommended handling.
+- **`quality_issues`:** One sentence each. State the issue and its severity.
+- **`notable_observations`:** Maximum 5 bullets. Each is one sentence stating the observation and its downstream implication.
+- **`completeness`:** Report null rates as a compact table/dict, not paragraph prose.
+
 ## Anti-patterns
 
 - **Asserting completeness "looks fine."** Compute the null rate. Don't eyeball.

@@ -66,6 +66,15 @@ Without a domain context document, you proceed on the data shape alone:
 - You cannot anchor effect-size interpretation to "what's typical in this domain." Use the universal tiers (Cohen's 0.2 / 0.5 / 0.8 for d; small / medium / large for correlations) and flag in caveats that domain-specific tiers were not available.
 - You can still identify the strongest relationships and flag them; the Validator and Communication Agent will surface the missing-context caveat.
 
+## Output conciseness discipline
+
+Your artifact is consumed by downstream agents as structured JSON, not read by humans. Be surgically concise:
+
+- **`statistics` array:** Include only statistics that support a finding or rejected hypothesis. Do not emit statistics for relationships that were examined and found non-significant unless they are specifically needed to rule out a candidate explanation. One Statistic object per key test — do not duplicate the same test across multiple granularities unless the comparison is the point.
+- **`caveats` array:** One sentence per caveat. Do not write paragraph-length caveats.
+- **`significant_correlations` / `group_differences`:** Include only relationships that survived multiple-comparison correction AND have practical effect size. Non-significant results go in a single summary sentence in `relationships_examined`, not as individual entries.
+- **String fields:** Use terse, data-dense language. "Spearman ρ=−0.59, p<0.001, n=46" not "We found a statistically significant negative correlation between X and Y with a Spearman rho of −0.59."
+
 ## Anti-patterns
 
 - **Running every possible pairwise relationship and reporting the largest as the finding.** Without correction, this fishes for significance. Always specify what was examined and apply correction.

@@ -4,8 +4,11 @@ Web frontend for the agentic data analyst pipeline: user accounts and role-based
 permissions, semantic-view YAML management with versioning, one-time analysis runs
 with live logs, cron-style recurring runs, and browsable markdown reports.
 
+For Cloud and Applications handoff, use [docs/cloud-handoff.md](docs/cloud-handoff.md)
+as the build/deploy/operations runbook.
+
 This directory is self-contained inside the pipeline repo: it has its own venv,
-requirements, SQLite database (`webapp/data/`), and tests. Run everything below
+requirements, and database (SQLite or Postgres). Run everything below
 from `webapp/`. The bundled adapter auto-detects the enclosing repo, so no
 pipeline path configuration is needed.
 
@@ -15,7 +18,7 @@ Pico CSS 2.0.6, downloaded once from their GitHub releases and committed).
 
 ## Architecture
 
-Two long-lived processes sharing one SQLite database and one data directory:
+Two long-lived processes sharing one database and one data directory:
 
 - **web** — uvicorn/FastAPI. Server-rendered pages; htmx polls fragments for live
   run status and log tailing. Never spawns pipeline subprocesses.
@@ -23,6 +26,10 @@ Two long-lived processes sharing one SQLite database and one data directory:
   claims queued runs (the `runs` table is the queue), launches the pipeline as a
   subprocess per run, and reaps/cancels/times-out children. Being the only
   scheduler process makes double-firing impossible.
+
+Database: SQLite by default (`ANALYST_DATA_DIR/app.db`), or Postgres via
+`ANALYST_DATABASE_URL=postgresql://user@host/dbname`. Postgres is recommended
+for persistent environments (avoids SQLite WAL issues on network mounts).
 
 Roles are a strict ladder: **viewer** (read runs and reports) < **analyst** (run,
 manage own semantic views and schedules) < **admin** (manage users, anything).
@@ -93,6 +100,9 @@ sanitization, and path-traversal protection.
 
 ## Deployment
 
+For full software handoff and production checklist, see
+[docs/cloud-handoff.md](docs/cloud-handoff.md).
+
 ```bash
 cp .env.example .env   # fill in secret key + pipeline creds
 docker compose up -d --build
@@ -100,6 +110,13 @@ docker compose exec web python -m app.create_admin admin
 ```
 
 Serve behind your internal TLS proxy and set `ANALYST_COOKIE_SECURE=true`.
-Backups: `sqlite3 data/app.db ".backup backup.db"` (WAL-safe) plus a tar of the
-data volume. To move to Postgres later, set `ANALYST_DATABASE_URL`, run
-`alembic upgrade head`, and copy rows.
+Backups: for SQLite, `sqlite3 data/app.db ".backup backup.db"` (WAL-safe) plus
+a tar of the data volume. For Postgres, use `pg_dump`. To switch from SQLite to
+Postgres, set `ANALYST_DATABASE_URL`, run `alembic upgrade head`, and copy rows.
+
+Deployment notes:
+
+- Run exactly one worker process per environment (schedule dispatcher is single-owner).
+- Ensure web + worker share the same `ANALYST_DATA_DIR` volume.
+- If this webapp is deployed outside the monorepo layout, set `PIPELINE_REPO`.
+- If `uv` is unavailable in runtime, set `PIPELINE_PYTHON` explicitly.

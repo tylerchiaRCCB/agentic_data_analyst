@@ -123,6 +123,48 @@ tables:
     - deal description
     sample_values:
     - No Message
+  - name: purchase_quantity
+    description: |-
+      Quantity customer must purchase to receive the promotion. Use this as the primary structured field for must-buy analysis instead of parsing EVEN_OFFER_STANDARD free text.
+    expr: PURCHASE_QUANTITY
+    data_type: NUMBER
+    synonyms:
+    - must-buy quantity
+    - buy quantity
+    - required quantity
+    - purchase threshold
+    sample_values:
+    - '1'
+    - '2'
+    - '3'
+  - name: free_quantity
+    description: |-
+      Free quantity customer receives from the promotion (for example buy-2-get-1 scenarios). Values of 0 indicate no free-unit component.
+    expr: FREE_QUANTITY
+    data_type: NUMBER
+    synonyms:
+    - free units
+    - bonus quantity
+    - get quantity
+    - giveaway quantity
+    sample_values:
+    - '0'
+    - '1'
+    - '2'
+  - name: save_quantity
+    description: |-
+      Quantity customer saves on from the promotion. Use with purchase_quantity and free_quantity to evaluate the full mechanic structure.
+    expr: SAVE_QUANTITY
+    data_type: NUMBER
+    synonyms:
+    - saving quantity
+    - discounted quantity
+    - savings threshold quantity
+    - quantity on deal
+    sample_values:
+    - '1'
+    - '2'
+    - '3'
   - name: edv_flag
     description: |-
       Every Day Value flag. When true, the item is priced at a permanent low price and is NOT considered a true promotional event. The mandatory scope filter excludes EDV = true rows, so all visible rows are genuine promotions.

@@ -1,0 +1,98 @@
+-- ==========================================================================
+-- Add delivery and merch columns to an existing V_OPD_WEEKLY_<DC> table
+-- via UPDATE (no fan-out risk).
+-- ==========================================================================
+-- Run AFTER creating the base table with create_opd_weekly_view.sql.
+-- Replace ALSIP with your DC name in the table reference.
+-- ==========================================================================
+
+-- Step 1: Add columns
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS DELIVERY_STOP_COUNT NUMBER DEFAULT 0;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS AVG_DELIVERY_DURATION_MINS FLOAT;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS TOTAL_DELIVERY_DURATION_MINS FLOAT;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS IS_DELIVERY_ACTIVE_WEEK NUMBER DEFAULT 0;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS MERCH_VISIT_COUNT NUMBER DEFAULT 0;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS AVG_MERCH_DURATION_MINS FLOAT;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS TOTAL_MERCH_DURATION_MINS FLOAT;
+ALTER TABLE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP
+  ADD COLUMN IF NOT EXISTS IS_MERCH_ACTIVE_WEEK NUMBER DEFAULT 0;
+
+-- Step 2: Populate delivery columns
+UPDATE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP t
+SET
+  DELIVERY_STOP_COUNT = d.delivery_stop_count,
+  AVG_DELIVERY_DURATION_MINS = d.avg_delivery_duration_mins,
+  TOTAL_DELIVERY_DURATION_MINS = d.total_delivery_duration_mins,
+  IS_DELIVERY_ACTIVE_WEEK = 1
+FROM (
+    SELECT
+        sc.store_nbr,
+        DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE)) AS week_start,
+        COUNT(*) AS delivery_stop_count,
+        AVG(DATEDIFF('minute', GM.ACTUAL_ARRIVAL_DATE, GM.ACTUAL_DEPARTURE_DATE)) AS avg_delivery_duration_mins,
+        SUM(DATEDIFF('minute', GM.ACTUAL_ARRIVAL_DATE, GM.ACTUAL_DEPARTURE_DATE)) AS total_delivery_duration_mins
+    FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+    JOIN (
+        SELECT
+            REGEXP_SUBSTR(CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+            MIN(CUSTOMER_ID) AS customer_id
+        FROM CCB_PRD.DM.D_CUSTOMER_V
+        WHERE CURRENT_IND = 'Y'
+          AND ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+          AND BUSINESS_TYPE_DESC = 'DSD'
+          AND REGEXP_SUBSTR(CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        GROUP BY 1
+    ) sc ON GM.CUSTOMER_ID = sc.customer_id
+    WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+      AND GM.ROLE = 'DC'
+      AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+    GROUP BY 1, 2
+) d
+WHERE t.STORE_NBR = d.store_nbr AND t.WEEK_START = d.week_start;
+
+-- Step 3: Populate merch columns
+UPDATE CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP t
+SET
+  MERCH_VISIT_COUNT = m.merch_visit_count,
+  AVG_MERCH_DURATION_MINS = m.avg_merch_duration_mins,
+  TOTAL_MERCH_DURATION_MINS = m.total_merch_duration_mins,
+  IS_MERCH_ACTIVE_WEEK = 1
+FROM (
+    SELECT
+        sc.store_nbr,
+        DATE_TRUNC('WEEK', DATE(GM.ROUTE_DATE)) AS week_start,
+        COUNT(*) AS merch_visit_count,
+        AVG(DATEDIFF('minute', GM.ACTUAL_ARRIVAL_DATE, GM.ACTUAL_DEPARTURE_DATE)) AS avg_merch_duration_mins,
+        SUM(DATEDIFF('minute', GM.ACTUAL_ARRIVAL_DATE, GM.ACTUAL_DEPARTURE_DATE)) AS total_merch_duration_mins
+    FROM CCB_PRD.GREEN_MILE_CORE.F_STOP GM
+    JOIN (
+        SELECT
+            REGEXP_SUBSTR(CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1)::INTEGER AS store_nbr,
+            MIN(CUSTOMER_ID) AS customer_id
+        FROM CCB_PRD.DM.D_CUSTOMER_V
+        WHERE CURRENT_IND = 'Y'
+          AND ACCOUNT_GROUP_DESC LIKE '%WALMART%'
+          AND BUSINESS_TYPE_DESC = 'DSD'
+          AND REGEXP_SUBSTR(CUSTOMER_DESC, '#([0-9]+)', 1, 1, 'e', 1) IS NOT NULL
+        GROUP BY 1
+    ) sc ON GM.CUSTOMER_ID = sc.customer_id
+    WHERE DATE(GM.ROUTE_DATE) >= '2025-01-01'
+      AND GM.ROLE LIKE '%MERCH%'
+      AND GM.ACTUAL_DEPARTURE_DATE IS NOT NULL
+    GROUP BY 1, 2
+) m
+WHERE t.STORE_NBR = m.store_nbr AND t.WEEK_START = m.week_start;
+
+-- Verify
+SELECT
+  COUNT(*) AS total_rows,
+  SUM(IS_DELIVERY_ACTIVE_WEEK) AS rows_with_delivery,
+  SUM(IS_MERCH_ACTIVE_WEEK) AS rows_with_merch
+FROM CCB_DATASCIENCE_DEV.WALMART_OPD.V_OPD_WEEKLY_ALSIP;

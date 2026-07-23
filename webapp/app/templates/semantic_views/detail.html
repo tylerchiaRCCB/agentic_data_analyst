@@ -78,4 +78,21 @@
 <h3>Current version preview</h3>
 <article class="yaml-preview">{{ preview_html | safe }}</article>
 {% endif %}
+
+{% if user.role != 'viewer' %}
+<h3>Domain context</h3>
+<details>
+  <summary role="button" class="secondary outline">Edit domain context ({{ view.name }}.md)</summary>
+  <form method="post" action="/semantic-views/{{ view.id }}/domain-doc">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Domain context document
+      <textarea name="domain_doc_text" rows="14" spellcheck="false">{{ domain_doc or '' }}</textarea>
+    </label>
+    <button type="submit">Save domain context</button>
+  </form>
+</details>
+{% elif domain_doc %}
+<h3>Domain context</h3>
+<article><pre>{{ domain_doc }}</pre></article>
+{% endif %}
 {% endblock %}

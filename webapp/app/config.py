@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     secret_key: str = "dev-only-change-me"
     data_dir: Path = Path("data")
     database_url: str = ""  # derived from data_dir when empty
+    # Pipeline repo root — auto-detected when webapp lives inside the repo
+    repo_root: Path = Path(__file__).resolve().parents[2]
 
     # Sessions
     session_cookie: str = "analyst_session"
@@ -41,6 +43,14 @@ class Settings(BaseSettings):
     @property
     def semantic_views_dir(self) -> Path:
         return self.data_dir / "semantic_views"
+
+    @property
+    def semantic_models_dir(self) -> Path:
+        return self.repo_root / "context" / "semantic_models"
+
+    @property
+    def domains_dir(self) -> Path:
+        return self.repo_root / "context" / "domains"
 
     @property
     def runs_dir(self) -> Path:

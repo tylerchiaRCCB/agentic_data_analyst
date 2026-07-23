@@ -89,6 +89,14 @@ def main() -> int:
     yaml_text = args.semantic_view.read_text(encoding="utf-8")
     directives = _parse_directives(yaml_text)
 
+    # Domain name from domain.txt (written by enqueue_run).
+    # YAML is always sent inline — no deployed semantic view needed.
+    domain_file = args.question_file.parent / "domain.txt"
+    if domain_file.exists():
+        domain_name = domain_file.read_text(encoding="utf-8").strip()
+        if domain_name:
+            directives.setdefault("domain", domain_name)
+
     out_dir = args.output_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,7 +124,10 @@ def main() -> int:
         else:
             model_name = f"webrun-{out_dir.name}"
             temp_model = models_dir / f"{model_name}.yaml"
-        (models_dir / f"{model_name}.yaml").write_text(yaml_text, encoding="utf-8")
+        # Strip non-Cortex top-level keys (domain, semantic_view) before writing
+        # so the inline YAML sent to Cortex Analyst won't be rejected.
+        clean_yaml = _TOP_LEVEL_KEY.sub("", yaml_text).lstrip("\n")
+        (models_dir / f"{model_name}.yaml").write_text(clean_yaml, encoding="utf-8")
         cmd += ["--domain", model_name]
 
     if backend := os.environ.get("PIPELINE_BACKEND", "").strip():

@@ -43,11 +43,18 @@ def build_command(run_dir: Path) -> list[str]:
     ]
 
 
-def build_env() -> dict[str, str]:
+def build_env(run_dir: Path | None = None) -> dict[str, str]:
     env = {}
     for key, value in os.environ.items():
         if key in FORWARDED_ENV_VARS or key.startswith(FORWARDED_ENV_PREFIXES):
             env[key] = value
+    # Per-run backend override (written by enqueue_run when user selects one)
+    if run_dir:
+        backend_file = run_dir / "backend.txt"
+        if backend_file.exists():
+            backend = backend_file.read_text(encoding="utf-8").strip()
+            if backend:
+                env["PIPELINE_BACKEND"] = backend
     return env
 
 
@@ -60,7 +67,7 @@ def launch(run_dir: Path) -> subprocess.Popen:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            env=build_env(),
+            env=build_env(run_dir),
             cwd=str(run_dir),
             start_new_session=True,  # own process group -> clean kill of children
         )

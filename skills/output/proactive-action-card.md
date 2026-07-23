@@ -9,9 +9,9 @@ The card must be **executive-readable** — not analyst-readable. Senior leaders
 
 **BREVITY RULES:**
 - Each card body (alert through caveats, excluding `<details>`) must be **under 400 words**.
-- "Why this matters" = **2-3 sentences max**. One quantified business consequence.
-- "Root cause" = **2-3 sentences max**. State what's known, what's not.
-- "Recommended action" = **2-3 sentences max**. Specific and executable.
+- "Why this matters" = **2-3 sentences max**. One quantified business consequence. Focus on the COST of inaction — dollars lost, picks missed, accounts at risk.
+- "Root cause" = **2-3 sentences max**. State the most likely operational cause and what evidence supports it. Be explicit about what's still unknown. If the data can identify the mechanism (e.g., nil-picks at pick time) but not the upstream driver (e.g., supply vs labor vs forecast), say both. **Do not stop at "what changed" — push to "why it changed" as far as the data allows.**
+- "Recommended action" = **2-3 sentences max**. Specific and executable. Must name what to DO, not what to investigate. If the root cause isn't fully identified, the action should be "pull X data to confirm Y" with a specific person and date, not "investigate further."
 - Caveats = **maximum 3 bullets**. Consolidate related caveats into one.
 - If you can't say it in 3 sentences, the finding needs tightening, not more words.
 - **COMPRESS, DON'T DISCARD:** Any caveats, supporting evidence, secondary analysis, or extended context beyond these limits goes into the card's `<details>` Methodology block. Nothing is lost — it moves from the executive layer to the analyst layer.

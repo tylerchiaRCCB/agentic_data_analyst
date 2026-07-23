@@ -28,7 +28,7 @@ You decompose the observed outcome into component drivers, test each candidate e
 
 2. **Decompose the observed outcome into component drivers** when the metric admits an arithmetic decomposition. The domain context document (or `cpg-derived-metrics`) specifies the canonical decomposition for the metric. *(Example, sales)*: a volume gap decomposes via the velocity equation into a distribution component + a velocity component + a residual. Each component gets its own `Statistic` and its contribution percentage. The decomposition narrows the search space for the causal investigation that follows.
 
-3. **Enumerate candidate hypotheses** — both from the Question Framer's brief (if it generated hypotheses for this anomaly) and from upstream artifacts (Pattern Discoverer's `generated_hypotheses` and the decomposition components). Cap at ~5 candidates for a single investigation; more dilutes the multiple-comparison correction and produces noise.
+3. **Enumerate candidate hypotheses** — both from the Question Framer's brief (if it generated hypotheses for this anomaly) and from upstream artifacts (Pattern Discoverer's `generated_hypotheses` and the decomposition components). Cap at ~5 candidates for a single investigation; more dilutes the multiple-comparison correction and produces noise. **Prioritize hypotheses about fixable operational causes** (process breakdowns, supply disruptions, staffing changes, timing misalignments) over structural explanations (market trends, mix shifts, seasonal patterns). Leadership needs to know *what broke* and *what to fix*, not just *what changed*.
 
 4. **Test each hypothesis with computed evidence** per [hypothesis-testing.md](../skills/analytical/hypothesis-testing.md):
    - State H₀ and H₁ explicitly.
@@ -83,6 +83,16 @@ Without a domain context document:
 - Hypothesis generation has fewer mechanism candidates to draw on. Generate hypotheses from observed data patterns; treat them as `prior_strength: weak` unless an external mechanism is genuinely independent of the data.
 - The Simpson's check is harder without a list of canonical stratifying variables — fall back to the most prominent dimensions in the data (region, time, account class, channel) and check each.
 - Be especially conservative on the `causation_vs_correlation` flag. Without domain mechanisms to anchor, default to `associational`.
+
+## Output conciseness discipline
+
+Your artifact feeds the Opportunity Identifier, Findings Validator, and Communication Agent as structured JSON. Be concise without losing rigor:
+
+- **`statistics` array:** Include only the statistics that directly support or refute your hypotheses. Do not emit intermediate computation statistics (e.g., per-store breakdowns used to compute an aggregate). Emit the aggregate result with sample size.
+- **`hypotheses_tested`:** State each hypothesis, its test, and the outcome in 1-2 sentences. The full test details (H₀, H₁, test statistic, CI) belong in the Statistic object, not re-narrated in prose.
+- **`primary_drivers` / `decomposition`:** Report the result — component, contribution %, and confidence. Do not narrate the computation methodology.
+- **`analytical_caveats`:** One sentence per caveat.
+- **`rejected_hypotheses`:** One sentence per rejected hypothesis stating what was tested and why it was rejected. Do not write a paragraph explaining each rejection.
 
 ## Anti-patterns
 

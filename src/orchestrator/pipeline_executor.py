@@ -773,6 +773,88 @@ class PipelineExecutor:
         )
         return [{"type": "text", "text": "\n\n".join(parts)}]
 
+    @staticmethod
+    def _extract_framer_directive(
+        upstream_artifacts: dict[str, dict[str, Any]] | None,
+    ) -> str | None:
+        """Pull the question framer's analytical questions, grouping key, and
+        success criteria into a binding directive block for downstream agents.
+
+        Without this, downstream agents see the framer output buried in a large
+        JSON blob and default to their own generic analysis playbook instead of
+        addressing the user's actual question.
+        """
+        if not upstream_artifacts:
+            return None
+        framer = upstream_artifacts.get("question-framer", {}).get("payload", {})
+        if not framer:
+            return None
+
+        lines: list[str] = [
+            "# BINDING DIRECTIVE — from Question Framer",
+            "",
+            "## CRITICAL: Answer the user's question FIRST",
+            "",
+            "The user asked a specific question. Your #1 job is to answer it.",
+            "The analytical questions, grouping key, and success criteria below "
+            "define what the user actually wants to know. Follow these rules:",
+            "",
+            "1. ALL of your findings must directly answer the analytical "
+            "questions below using the specified grouping key.",
+            "2. Do NOT run generic exploratory analysis (e.g., IN_AD lift, "
+            "discount depth correlations, account outliers) unless the user's "
+            "question specifically asks for it.",
+            "3. If the Communication Agent receives your output, every action "
+            "card must be about the user's question — not tangential insights.",
+            "4. Do NOT lead with a finding about a different topic just because "
+            "it has a larger effect size. If it's not about the question, "
+            "leave it out.",
+            "5. The Weekly Summary may note stable observations, but do NOT "
+            "promote unrelated patterns to action cards.",
+            "",
+        ]
+
+        if qs := framer.get("analytical_questions"):
+            lines.append("## Analytical questions (mandatory — answer these FIRST)")
+            for i, q in enumerate(qs, 1):
+                lines.append(f"{i}. {q}")
+            lines.append("")
+
+        dr = framer.get("data_requirements", {})
+
+        if filters := dr.get("mandatory_filters") or dr.get("scope_filters"):
+            lines.append("## Mandatory data filters — APPLY BEFORE ANY ANALYSIS")
+            lines.append(
+                "You MUST filter the dataframe to ONLY the rows matching these "
+                "conditions BEFORE running any statistics, comparisons, or "
+                "aggregations. Do NOT analyze the full dataset and then mention "
+                "the filter — apply it first in your code."
+            )
+            for f in filters:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if gk := dr.get("grouping_key"):
+            lines.append(f"## Primary grouping key: `{gk}`")
+            lines.append(
+                "Your primary comparisons and rankings MUST use this grouping key. "
+                "Other groupings (account, PPG, mechanic flags) are secondary lenses "
+                "for triangulation, not replacements."
+            )
+            lines.append("")
+
+        if sc := framer.get("success_criteria"):
+            lines.append("## Success criteria")
+            lines.append(sc)
+            lines.append("")
+
+        if dc := framer.get("decision_context"):
+            lines.append("## Decision context")
+            lines.append(dc)
+            lines.append("")
+
+        return "\n".join(lines) if len(lines) > 4 else None
+
     def _build_user_message(
         self,
         *,
@@ -797,6 +879,12 @@ class PipelineExecutor:
         parts: list[str] = [
             f"# Stage role\nYou are running as the **{agent}** agent."
         ]
+
+        # Inject framer directive so downstream agents address the actual question
+        directive = self._extract_framer_directive(upstream_artifacts)
+        if directive:
+            parts.append(directive)
+
         if dataset_file_id:
             parts.append(
                 "# Dataset access\n"
@@ -813,10 +901,10 @@ class PipelineExecutor:
                 "(per pipeline-definitions.md §10)."
             )
         if upstream_artifacts:
-            parts.append("# Upstream artifacts (computed summaries — NOT raw rows)")
             payloads = {
                 name: art.get("payload", {}) for name, art in upstream_artifacts.items()
             }
+            parts.append("# Upstream artifacts (computed summaries — NOT raw rows)")
             parts.append("```json\n" + json.dumps(payloads, indent=2, default=str) + "\n```")
         if self.previous_run_context:
             parts.append(
@@ -836,3 +924,5 @@ class PipelineExecutor:
 
         blocks.append({"type": "text", "text": "\n\n".join(parts)})
         return blocks
+
+    # ---------- End of user message assembly ----------

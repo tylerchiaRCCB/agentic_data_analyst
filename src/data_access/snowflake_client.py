@@ -111,6 +111,15 @@ class SnowflakeConfig:
                 "Either SNOWFLAKE_PRIVATE_KEY or SNOWFLAKE_PASSWORD must be set."
             )
 
+        # If SNOWFLAKE_PRIVATE_KEY is base64-encoded DER, decode it
+        priv_bytes = None
+        if priv:
+            import base64
+            try:
+                priv_bytes = base64.b64decode(priv)
+            except Exception:
+                pass  # Not base64 — leave as string for connector to handle
+
         return cls(
             account=os.environ["SNOWFLAKE_ACCOUNT"],
             user=os.environ["SNOWFLAKE_USER"],
@@ -118,7 +127,8 @@ class SnowflakeConfig:
             role=os.environ["SNOWFLAKE_ROLE"],
             database=os.environ["SNOWFLAKE_DATABASE"],
             schema=os.environ["SNOWFLAKE_SCHEMA"],
-            private_key=priv,
+            private_key=priv if not priv_bytes else None,
+            private_key_bytes=priv_bytes,
             password=pwd,
         )
 

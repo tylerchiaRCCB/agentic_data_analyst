@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/vendor/pico.min.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/vendor/htmx.min.js" defer></script>
+  <script src="/static/vendor/mermaid.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}" {% if csrf_token %}hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>

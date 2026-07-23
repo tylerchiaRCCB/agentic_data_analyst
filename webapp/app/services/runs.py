@@ -18,6 +18,7 @@ def enqueue_run(
     version: SemanticViewVersion,
     user: User | None = None,
     schedule_id: int | None = None,
+    backend: str = "",
 ) -> Run:
     """Create a queued run with a self-contained run directory. The worker picks it up."""
     run = Run(
@@ -33,9 +34,14 @@ def enqueue_run(
     rdir = run_dir(run.id)
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "artifacts").mkdir(exist_ok=True)
-    # Copy the pinned semantic view so the run is reproducible even if versions change
-    shutil.copyfile(settings.data_dir / version.file_path, rdir / "input.yaml")
+    # Build input.yaml from the versioned semantic model
+    raw_yaml = (settings.data_dir / version.file_path).read_text(encoding="utf-8")
+    (rdir / "input.yaml").write_text(raw_yaml, encoding="utf-8")
+    # Pass domain name so the adapter knows the model name for --domain
+    (rdir / "domain.txt").write_text(view.name, encoding="utf-8")
     (rdir / "question.txt").write_text(run.question, encoding="utf-8")
+    if backend:
+        (rdir / "backend.txt").write_text(backend.strip(), encoding="utf-8")
 
     run.log_path = f"runs/{run.id}/run.log"
     run.report_path = f"runs/{run.id}/report.md"

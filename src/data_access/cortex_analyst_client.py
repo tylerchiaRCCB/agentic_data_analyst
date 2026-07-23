@@ -200,18 +200,220 @@ def _is_tpo_target(semantic_model_name: str, semantic_view: str | None) -> bool:
     return "TPO_ANAPLAN_ANALYSIS" in sv or "TPO_" in sv
 
 
-def _tpo_context_guardrail() -> str:
-    """Steer Cortex to preserve time and EDV scope context in TPO retrievals."""
+# ---------------------------------------------------------------------------
+# Schema-driven retrieval — generic, works for any domain
+# ---------------------------------------------------------------------------
+
+def _load_semantic_model_spec(semantic_model_name: str) -> dict | None:
+    """Load the semantic model YAML and return its parsed dict, or None."""
+    model_path = SEMANTIC_MODELS_DIR / f"{semantic_model_name}.yaml"
+    if not model_path.exists():
+        # Try with hyphens/underscores swapped
+        alt = semantic_model_name.replace("-", "_")
+        model_path = SEMANTIC_MODELS_DIR / f"{alt}.yaml"
+    if not model_path.exists():
+        return None
+    try:
+        import yaml
+        with model_path.open() as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return None
+
+
+def _build_schema_driven_prompt(spec: dict, question: str) -> str | None:
+    """Build a retrieval prompt from a semantic model YAML.
+
+    For small/medium models (e.g. TPO ~136K rows at week × account × PPG grain),
+    requests ALL dimensions and measures at the model's grain.
+
+    For large models where the raw grain is very fine (e.g. UPC × Store × Day =
+    millions of rows), defers to Cortex's SQL generation guided by the model's
+    own description and granularity rules. The prompt still requests all measures
+    but lets the model description control the GROUP BY grain.
+    """
+    tables = spec.get("tables", [])
+    if not tables:
+        return None
+    table = tables[0]
+
+    dimensions = table.get("dimensions", [])
+    time_dims = table.get("time_dimensions", [])
+    measures = table.get("measures", []) or table.get("facts", [])
+
+    if not dimensions and not measures:
+        return None
+
+    # Detect large/fine-grain models by checking for signals in the description
+    model_desc = (spec.get("description", "") + " " + table.get("description", "")).lower()
+    is_large_grain = any(signal in model_desc for signal in [
+        "upc ×", "upc x", "sku ×", "sku x",
+        "daily", "per day", "per date",
+        "millions", "store × date", "store x date",
+    ])
+
+    dim_names = [d["name"] for d in dimensions if d.get("name")]
+    time_dim_names = [d["name"] for d in time_dims if d.get("name")]
+    measure_names = [m["name"] for m in measures if m.get("name")]
+
+    # Skip dimensions that are known to be 100% null
+    skip_dims = set()
+    for d in dimensions:
+        if d.get("sample_values") == [] and "null" in d.get("description", "").lower():
+            skip_dims.add(d["name"])
+
+    active_dims = [d for d in dim_names if d not in skip_dims]
+    measure_bullet = "\n".join(f"- {m}" for m in measure_names)
+
+    if is_large_grain:
+        # Large model: explicitly tell Cortex to aggregate to a manageable grain.
+        # Extract grain hint from model description if available.
+        grain_hint = ""
+        for pattern in [
+            r"(?:return|aggregate|group).*?at\s+(?:the\s+)?(\w+\s*[×x]\s*\w+(?:\s*[×x]\s*\w+)*)\s+(?:level|grain)",
+            r"(\w+\s*[×x]\s*\w+(?:\s*[×x]\s*\w+)*)\s+(?:level|grain)",
+        ]:
+            import re as _re
+            m = _re.search(pattern, model_desc, _re.IGNORECASE)
+            if m:
+                grain_hint = m.group(1).strip()
+                break
+
+        if not grain_hint:
+            # Default: aggregate to week level by dropping the finest time dimension
+            grain_hint = "weekly (aggregate daily rows to week level)"
+
+        # Collect key dimensions from ALL tables (including bridge/dimension tables)
+        # so Cortex joins them in even when aggregating.
+        bridge_dims: list[str] = []
+        seen_dims: set[str] = set()
+        for t in tables[1:]:
+            for d in t.get("dimensions", []):
+                dname = d.get("name", "")
+                if dname and dname not in skip_dims and dname not in seen_dims \
+                        and "join" not in d.get("description", "").lower()[:30]:
+                    bridge_dims.append(dname)
+                    seen_dims.add(dname)
+
+        bridge_bullet = ""
+        if bridge_dims:
+            bridge_bullet = (
+                f"\nINCLUDE THESE DIMENSIONS FROM RELATED TABLES (join as needed):\n"
+                + "\n".join(f"- {d}" for d in bridge_dims[:15])  # cap at 15
+                + "\n"
+            )
+
+        return (
+            f"DATA RETRIEVAL REQUEST — aggregate to a manageable grain.\n\n"
+            f"You are a data-retrieval layer. The underlying table has millions of rows "
+            f"at fine grain. You MUST aggregate to a coarser grain before returning.\n\n"
+            f"REQUIRED AGGREGATION GRAIN: {grain_hint}\n"
+            f"- Convert daily dates to WEEK (e.g., DATE_TRUNC('WEEK', date_column)) and "
+            f"GROUP BY the week, NOT the individual date.\n"
+            f"- Do NOT group by individual UPC/SKU/item unless the question specifically "
+            f"asks about a specific product. Group by category or brand instead.\n"
+            f"- Target fewer than 500,000 rows in the result.\n\n"
+            f"MANDATORY MEASURES (include in SELECT as SUM aggregates):\n{measure_bullet}\n"
+            f"{bridge_bullet}\n"
+            f"RULES:\n"
+            f"- JOIN to related/bridge tables to include attribution dimensions.\n"
+            f"- Include numerators AND denominators for rate metrics.\n"
+            f"- Do NOT pre-compute rankings, top-N, or ORDER BY ... LIMIT.\n"
+            f"- Apply date filters ONLY if the question explicitly requests a time range.\n\n"
+            f"QUESTION CONTEXT (what the analyst wants to explore):\n"
+            f"{question}"
+        )
+
+    # Small/medium model: request full grain with all dimensions
+    all_group_by = active_dims + time_dim_names
+    dim_bullet = "\n".join(f"- {d}" for d in active_dims)
+    time_bullet = "\n".join(f"- {d}" for d in time_dim_names)
+    group_by_list = ", ".join(all_group_by)
+
     return (
-        "TPO CONTEXT GUARDRAIL:\n"
-        "- Preserve temporal context in the returned dataset. Include YEAR (or alias as FISCAL_YEAR), "
-        "WEEK_NUM (or alias as WEEK_NUMBER), and TRY_TO_DATE(PROMO_WEEK_START) AS PROMO_WEEK_START when available.\n"
-        "- If aggregating, include these time fields in GROUP BY so downstream agents can perform "
-        "time-based caveat checks.\n"
-        "- Preserve promotion-scope context in the returned dataset. Include EDV as EDV_FLAG when available. "
-        "If EDV is not exposed in the semantic target, include CAST(FALSE AS BOOLEAN) AS EDV_SCOPE_APPLIED.\n"
-        "- Keep the core business grain requested by the question (e.g., ACCOUNT × PPG × EVEN_OFFER_STANDARD) "
-        "while retaining the context fields above."
+        f"DATA RETRIEVAL REQUEST — return the FULL dataset, do NOT pre-answer the question.\n\n"
+        f"You are a data-retrieval layer. The question below is context for what the analyst "
+        f"wants to explore — your job is to return granular rows, not to answer the question.\n\n"
+        f"MANDATORY GRAIN: GROUP BY {group_by_list}\n\n"
+        f"MANDATORY DIMENSIONS (include in SELECT and GROUP BY):\n{dim_bullet}\n\n"
+        f"MANDATORY TIME DIMENSIONS (include in SELECT and GROUP BY):\n{time_bullet}\n\n"
+        f"MANDATORY MEASURES (include in SELECT as aggregates):\n{measure_bullet}\n\n"
+        f"RULES:\n"
+        f"- Return ALL rows — do NOT filter to entities mentioned in the question.\n"
+        f"- Do NOT pre-compute rankings, top-N, or ORDER BY ... LIMIT.\n"
+        f"- Do NOT omit dimensions or measures not mentioned in the question.\n"
+        f"- One row per combination of the GROUP BY dimensions above.\n"
+        f"- Apply date filters ONLY if the question explicitly requests a specific time range.\n\n"
+        f"QUESTION CONTEXT (what the analyst wants to explore — retrieve the data, do not answer it):\n"
+        f"{question}"
+    )
+
+
+def _schema_driven_warnings(spec: dict, df: pd.DataFrame) -> list[str]:
+    """Check retrieved DataFrame against the semantic model spec for missing columns."""
+    if not spec or not spec.get("tables"):
+        return []
+    table = spec["tables"][0]
+    cols = {str(c).upper() for c in df.columns}
+
+    expected_dims = {d["name"].upper() for d in table.get("dimensions", []) if d.get("name")}
+    expected_measures = {m["name"].upper() for m in table.get("measures", []) if m.get("name")}
+    expected_time = {d["name"].upper() for d in table.get("time_dimensions", []) if d.get("name")}
+
+    # Normalize: Cortex may alias names (e.g. fiscal_year vs YEAR)
+    # Check using the name from the model as-is
+    all_expected = expected_dims | expected_measures | expected_time
+    missing = all_expected - cols
+    if not missing:
+        return []
+
+    return [
+        f"SCHEMA_DRIVEN_MISSING_COLUMNS: {len(missing)} of {len(all_expected)} "
+        f"expected columns missing from retrieval: {', '.join(sorted(missing))}. "
+        f"Cortex may have aggregated away dimensions or omitted measures not "
+        f"mentioned in the question."
+    ]
+
+
+def _tpo_context_guardrail() -> str:
+    """Override Cortex retrieval for TPO: always return the full dimension + measure set.
+
+    Cortex Analyst tries to answer the question directly by pre-aggregating.
+    We need granular rows at ACCOUNT × PPG × EVEN_OFFER_STANDARD × WEEK grain
+    so downstream analytical agents can do their own analysis.
+    """
+    return (
+        "TPO DATA RETRIEVAL OVERRIDE — ignore the question's apparent scope and return "
+        "the FULL dataset at the grain specified below. The question is context for what "
+        "the analyst wants to explore, NOT a query to pre-answer.\n\n"
+        "MANDATORY GRAIN: GROUP BY account, ppg, even_offer_standard, fiscal_year, week_number, promo_week_start\n\n"
+        "MANDATORY DIMENSIONS (all must appear in SELECT and GROUP BY):\n"
+        "- ACCOUNT\n"
+        "- PPG\n"
+        "- EVEN_OFFER_STANDARD\n"
+        "- YEAR (alias as FISCAL_YEAR)\n"
+        "- WEEK_NUM (alias as WEEK_NUMBER)\n"
+        "- TRY_TO_DATE(PROMO_WEEK_START) AS PROMO_WEEK_START\n"
+        "- HOLIDAYS (alias as HOLIDAY)\n"
+        "- EDV (alias as EDV_FLAG) — if not available, include CAST(FALSE AS BOOLEAN) AS EDV_SCOPE_APPLIED\n"
+        "- IN_AD\n"
+        "- DIGITAL_DEAL\n"
+        "- ACCELERATION\n"
+        "- FLAVOR_SEGMENTATION\n\n"
+        "MANDATORY MEASURES (all must appear in SELECT as SUM aggregates):\n"
+        "- retail_units\n"
+        "- base_retail_units\n"
+        "- incremental_retail_units\n"
+        "- unit_lift_rate\n"
+        "- percent_lift\n"
+        "- dnnsi\n"
+        "- dngp\n\n"
+        "RULES:\n"
+        "- Do NOT pre-filter to only the entities mentioned in the question. Return ALL accounts, ALL PPGs.\n"
+        "- Do NOT pre-answer the question (no ORDER BY ... LIMIT, no top-N, no pre-computed rankings).\n"
+        "- Do NOT omit dimensions or measures not mentioned in the question.\n"
+        "- The result should have one row per ACCOUNT × PPG × OFFER × WEEK combination.\n"
+        "- Apply no date filter unless the question explicitly requests a specific fiscal year.\n"
     )
 
 
@@ -235,6 +437,14 @@ def _tpo_context_warnings(df: pd.DataFrame) -> list[str]:
             "TPO_CONTEXT_MISSING_EDV_COLUMNS: expected EDV_FLAG/EDV or EDV_SCOPE_APPLIED "
             "to preserve promo-scope provenance."
         )
+    if "ACCOUNT" not in cols:
+        warnings.append("TPO_CONTEXT_MISSING_ACCOUNT: ACCOUNT dimension not in retrieved columns.")
+    if "PPG" not in cols:
+        warnings.append("TPO_CONTEXT_MISSING_PPG: PPG dimension not in retrieved columns.")
+    if "DNNSI" not in cols:
+        warnings.append("TPO_CONTEXT_MISSING_DNNSI: DNNSI measure not in retrieved columns.")
+    if "DNGP" not in cols:
+        warnings.append("TPO_CONTEXT_MISSING_DNGP: DNGP measure not in retrieved columns.")
 
     return warnings
 
@@ -357,12 +567,27 @@ class CortexAnalystClient:
         if self.mock_mode:
             return self._mock_response(question, semantic_model, limit)
 
-        # ---- Reframe analytical questions for data retrieval ----
+        # ---- Schema-driven data retrieval ----
+        # Try to load the semantic model YAML and build a deterministic
+        # retrieval prompt that requests ALL dimensions and measures.
+        # This prevents Cortex from pre-answering the question.
+        spec = _load_semantic_model_spec(semantic_model)
+        schema_prompt = _build_schema_driven_prompt(spec, question) if spec else None
         analytical = _is_analytical(question)
-        effective_question = (
-            _reframe_for_retrieval(question, semantic_model) if analytical else question
-        )
-        if analytical and _is_tpo_target(semantic_model, semantic_view):
+        is_tpo = _is_tpo_target(semantic_model, semantic_view)
+
+        if schema_prompt:
+            # Schema-driven: use the full-schema prompt regardless of question
+            effective_question = schema_prompt
+            logger.info("Using schema-driven retrieval for model=%s", semantic_model)
+        elif analytical:
+            # Fallback: generic reframing for domains without a YAML spec
+            effective_question = _reframe_for_retrieval(question, semantic_model)
+        else:
+            effective_question = question
+
+        # TPO legacy guardrail as a safety net (in case schema-driven missed something)
+        if is_tpo and not schema_prompt:
             effective_question = f"{effective_question}\n\n{_tpo_context_guardrail()}"
         if _is_delivery_related(question):
             effective_question = (
@@ -578,8 +803,12 @@ class CortexAnalystClient:
                 f"store × week grain."
             )
 
-        if analytical and _is_tpo_target(semantic_model, semantic_view):
+        if is_tpo:
             warnings.extend(_tpo_context_warnings(df))
+
+        # Generic schema-driven column check for any domain with a YAML spec
+        if spec:
+            warnings.extend(_schema_driven_warnings(spec, df))
 
         return CortexAnalystResponse(
             generated_sql=generated_sql,

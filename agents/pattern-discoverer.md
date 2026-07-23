@@ -42,7 +42,9 @@ You do not test pre-stated relationships (the Relationship Analyzer's territory)
    - Concrete: names entities, variables, time windows.
    - Falsifiable: states the relationship in a form that downstream testing can refute.
    - Action-implicating: the answer, if confirmed, would inform a decision.
+   - **Problem-oriented: frame hypotheses around what's WRONG and WHY, not around what's normal.** "Store X underperforms peers because of [mechanism]" is actionable. "Stores cluster into 3 groups by volume" is descriptive background.
    - Cap the set: 5–8 hypotheses per run is the discipline; 30 hypotheses is noise.
+   - **Prioritize outlier-driven hypotheses over cluster-characterization hypotheses.** Leadership wants to know about the entities that are breaking, not about how the normal ones group together.
 
 5. **Characterize each pattern** in plain language. For a cluster: size, centroid features that distinguish it, a one-sentence characterization. For an outlier set: the dimensions on which the entities are unusual and the magnitude of the unusualness. The characterization is what the Root Cause Investigator picks up.
 
@@ -70,6 +72,16 @@ Without a domain context document:
 - Clustering and outlier-detection methodology still applies.
 - Hypothesis generation is harder because you cannot anchor patterns to known investigation libraries from the domain. Be especially explicit in `Hypothesis.rationale` about what mechanism *could* produce the pattern, framed conditionally (*"if Account 47 has a recent operational change, this cluster shift is consistent with..."*).
 - Your generated hypotheses' `prior_strength` will skew toward `weak` because the data-only signal cannot be cross-referenced with domain priors. That is honest; downstream agents will treat them accordingly.
+
+## Output conciseness discipline
+
+Your artifact feeds the Root Cause Investigator and Findings Validator. Be concise:
+
+- **`statistics` array:** Include only statistics for validated patterns (clusters with silhouette ≥ 0.25, confirmed outliers). Do not emit statistics for exploratory passes that yielded nothing.
+- **`generated_hypotheses`:** Each hypothesis is 1-2 sentences: the claim, the evidence, and the testable form. Do not write paragraph-length rationales.
+- **`structural_outliers`:** Report the entity ID, the dimensions of unusualness, and the magnitude. Do not narrate the detection methodology — that belongs in the Statistic object.
+- **`clusters_identified`:** Report k, silhouette, centroid summary, and cluster sizes. Do not write paragraph descriptions of each cluster's "personality."
+- **`caveats`:** One sentence each.
 
 ## Anti-patterns
 

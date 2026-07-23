@@ -55,6 +55,10 @@ from src.orchestrator.pipeline_executor import PipelineConfig, PipelineExecutor
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger(__name__)
 
+# Suppress verbose Azure SDK HTTP logging
+for _azure_logger_name in ("azure", "azure.identity", "azure.core.pipeline.policies.http_logging_policy"):
+    logging.getLogger(_azure_logger_name).setLevel(logging.WARNING)
+
 _DELIVERY_COVERAGE_WARNING_PREFIX = "DELIVERY_COVERAGE_LOW"
 
 
@@ -138,11 +142,12 @@ def parse_args() -> CLIArgs:
     p.add_argument(
         "--backend",
         type=str,
-        choices=["anthropic", "foundry", "foundry-dev", "azure-openai"],
+        choices=["anthropic", "foundry", "foundry-dev", "foundry-sonnet5", "azure-openai"],
         default="foundry-dev",
         help="LLM backend. 'anthropic' uses direct Anthropic API (chris-anderson-anthropic key). "
         "'foundry' uses Azure AI Foundry Anthropic models (raghu-anthropic key, data stays in Azure). "
         "'foundry-dev' uses Azure AI Foundry dev environment (raghu-anthropic-dev key). "
+        "'foundry-sonnet5' uses Azure AI Foundry claude-sonnet-5 (raghu-sonnet-dev key). "
         "'azure-openai' uses Azure OpenAI (raghu-openai key, GPT models via LiteLLM).",
     )
     p.add_argument(
@@ -491,6 +496,7 @@ def main() -> int:
         "anthropic": "chris-anderson-anthropic",
         "foundry": "raghu-anthropic",
         "foundry-dev": "raghu-anthropic-dev",
+        "foundry-sonnet5": "raghu-sonnet-dev",
         "azure-openai": "raghu-openai",
     }
 
@@ -536,6 +542,15 @@ def main() -> int:
             if original in _AZURE_OPENAI_MODEL_MAP:
                 model_map[agent_name] = _AZURE_OPENAI_MODEL_MAP[original]
                 logger.info("Azure OpenAI model remap: %s → %s (agent: %s)", original, model_map[agent_name], agent_name)
+
+    # For foundry-sonnet5, remap all agents to claude-sonnet-5.
+    if args.backend == "foundry-sonnet5":
+        model_map = cfg["model_per_agent"]
+        for agent_name in model_map:
+            original = model_map[agent_name]
+            if original != "claude-sonnet-5":
+                model_map[agent_name] = "claude-sonnet-5"
+                logger.info("Sonnet 5 model remap: %s → claude-sonnet-5 (agent: %s)", original, agent_name)
 
     pipeline_cfg = PipelineConfig(
         model_per_agent=cfg["model_per_agent"],
@@ -583,10 +598,11 @@ def main() -> int:
         _foundry_urls = {
             "foundry": _FOUNDRY_BASE_URL,
             "foundry-dev": _FOUNDRY_DEV_BASE_URL,
+            "foundry-sonnet5": _FOUNDRY_DEV_BASE_URL,
         }
         client = ClaudeClient(
             api_key=llm_api_key,
-            backend=args.backend if args.backend != "foundry-dev" else "foundry",
+            backend=args.backend if args.backend not in ("foundry-dev", "foundry-sonnet5") else "foundry",
             base_url=_foundry_urls.get(args.backend),
         )
 
@@ -732,7 +748,12 @@ def main() -> int:
         import tempfile
 
         with tracer.span("data_access.cortex_analyst"):
-            sf_config = SnowflakeConfig.from_team_keyvault()
+            try:
+                sf_config = SnowflakeConfig.from_env()
+                logger.info("Loaded Snowflake config from environment variables")
+            except Exception:
+                sf_config = SnowflakeConfig.from_team_keyvault()
+                logger.info("Loaded Snowflake config from Azure Key Vault")
             sf_client = SnowflakeClient(sf_config)
             cortex = CortexAnalystClient(snowflake=sf_client)
 
@@ -1020,7 +1041,10 @@ def _dry_run(args: CLIArgs) -> int:
             from src.data_access.cortex_analyst_client import CortexAnalystClient
             from src.data_access.snowflake_client import SnowflakeClient, SnowflakeConfig
 
-            sf_config = SnowflakeConfig.from_team_keyvault()
+            try:
+                sf_config = SnowflakeConfig.from_env()
+            except Exception:
+                sf_config = SnowflakeConfig.from_team_keyvault()
             sf_client = SnowflakeClient(sf_config)
             cortex = CortexAnalystClient(snowflake=sf_client)
             semantic_model_name = args.domain or "default"

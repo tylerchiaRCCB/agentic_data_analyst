@@ -29,6 +29,9 @@ One row = one **week × account × PPG** observation with promotion attributes, 
 | `HOLIDAYS` | Seasonal or holiday context for the promotion week |
 | `EVEN_OFFER_STANDARD` | Standardized promotion offer message |
 | `EVENT_OFFER_RPA` | RPA-style promotion offer description |
+| `PURCHASE_QUANTITY` | Quantity customer must purchase to receive promotion |
+| `FREE_QUANTITY` | Free quantity customer receives from promotion |
+| `SAVE_QUANTITY` | Quantity customer saves on from promotion |
 | `IN_AD` | Whether the promotion was featured in retailer advertising |
 | `ACCELERATION` | Whether the promotion is classified as an acceleration event |
 | `DIGITAL_DEAL` | Whether the promotion was a digital offer |
@@ -61,6 +64,7 @@ One row = one **week × account × PPG** observation with promotion attributes, 
 - `ACCOUNT` is the main external customer dimension for comparing promo response across banners or retailers.
 - `EDV = 'true'` means the row represents an everyday-value condition rather than a true promotional event; exclude from promo-effectiveness conclusions.
 - Promotions with no message (`EVEN_OFFER_STANDARD = 'No Message'`) should not be interpreted as real advertised promotional mechanics.
+- For must-buy mechanics, prefer `PURCHASE_QUANTITY`, `FREE_QUANTITY`, and `SAVE_QUANTITY` over free-text parsing of `EVEN_OFFER_STANDARD`.
 
 ## Analytical Guardrails
 - Always compute rates using aggregated numerators and denominators where available. Do not average pre-computed row-level rates across groups if a true numerator/denominator formulation exists.
@@ -74,6 +78,7 @@ One row = one **week × account × PPG** observation with promotion attributes, 
 - Compare `unit_lift_rate`, `incremental_retail_units`, `dngp`, and `dnnsi` by `ACCOUNT` to identify the best-performing retailer relationships.
 - Compare promo effectiveness by `PPG` to see which product groups respond best to promotions.
 - Segment by `IN_AD`, `DIGITAL_DEAL`, `ACCELERATION`, and `FLAVOR_SEGMENTATION` to evaluate which promotion mechanics drive lift.
+- Segment by `PURCHASE_QUANTITY`, `FREE_QUANTITY`, and `SAVE_QUANTITY` to evaluate which bundle structures drive lift and profitability.
 - Evaluate holiday effects by comparing outcomes across `HOLIDAYS` and fiscal periods.
 - Compare `communicated_promo_price`, `white_tag_price`, and `percentage_discount` to understand whether deeper discounts actually improve lift and profitability.
 

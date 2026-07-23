@@ -4,13 +4,3 @@
 .ipynb_aml_checkpoints/ 
 *.amltmp 
 *.amltemp
-.venv/
-webapp/.venv/
-runs/
-webapp/persistent-data/
-webapp/data/
-catboost_info/
-__pycache__/
-*.pyc
-.git/
-node_modules/

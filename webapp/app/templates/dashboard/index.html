@@ -12,6 +12,12 @@
       <select name="semantic_view_id" required>
         {% for v in views %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
       </select>
+      <select name="backend">
+        <option value="">Default</option>
+        <option value="foundry-dev">Opus</option>
+        <option value="foundry-sonnet5">Sonnet 5</option>
+        <option value="anthropic">Anthropic Direct</option>
+      </select>
       <input type="text" name="question" required placeholder="e.g. What drove the change in weekly active users last month?">
       <button type="submit">Run analysis</button>
     </div>

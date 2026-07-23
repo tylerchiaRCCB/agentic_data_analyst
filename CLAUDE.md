@@ -18,6 +18,61 @@ See [README.md](README.md) "What this is — and what it is not" for the framing
 
 ---
 
+## Recent implementation updates (2026-07-07)
+
+Read this section before changing retrieval, communication output, or webapp behavior. It captures decisions made during the latest integration cycle.
+
+1. Retrieval behavior was hardened in `src/data_access/cortex_analyst_client.py`.
+  - Added schema/semantic-model-driven retrieval prompt construction to reduce Cortex over-aggregation.
+  - Retrieval prompts now explicitly request analysis-ready grain/columns, then downstream checks emit schema-driven missing-column warnings.
+  - TPO-specific context guardrails remain in place and are layered with the broader schema-driven approach.
+
+2. Profiler schema strictness was adjusted in `src/orchestrator/schemas.py`.
+  - `DataProfilerPayload.completeness` now accepts both dict-like structures and `_notes` string entries seen in real profiler outputs.
+  - This prevents false hard-fails from shape variance while preserving typed validation.
+
+3. Communication output guidance was simplified for business readers.
+  - Updated `agents/communication-agent.md` and output skills to prefer plain language, concise action framing, and reduced technical jargon.
+  - Communication-only replay remains the preferred loop for output tuning.
+
+4. Webapp semantics workflow now edits repo files directly.
+  - Added `webapp/app/services/repo_sync.py` for import/save sync between DB records and `context/semantic_models` + domain docs.
+  - Routers now auto-import repo semantic models and persist edits back to repository files.
+  - The intended behavior is a single source of truth in repo semantic/domain files, not a parallel webapp-only semantic layer.
+
+5. Webapp reliability and rendering were improved.
+  - Worker loads required non-`ANALYST_` env vars from `.env` in `webapp/app/worker/loop.py`.
+  - Added missing runs templates and fixed run-log duplication behavior.
+  - Mermaid chart rendering and HTML `<details>` rendering are enabled in the markdown-to-report path.
+
+6. Runtime operational reality.
+  - `uvicorn --reload` generally picks up API code edits automatically.
+  - Worker process must be running to execute jobs. If it stops, restart with `cd webapp && .venv/bin/python -m app.worker`.
+
+If a future change conflicts with any point above, flag it explicitly in your PR/commit message with rationale.
+
+## Recent implementation updates (2026-07-08)
+
+7. Binding directive enforces question adherence in `src/orchestrator/pipeline_executor.py`.
+  - `_extract_framer_directive()` pulls the framer's analytical questions, mandatory filters, grouping key, and success criteria into an explicit instruction block injected at the top of every downstream agent's user message.
+  - Rules: all findings must answer the question; mandatory data filters must be applied to the dataframe before any analysis; no generic exploratory analysis unless the question asks for it.
+
+8. Inline YAML is now the default Cortex Analyst path.
+  - The adapter sends YAML inline to Cortex — no deployed Snowflake semantic view required.
+  - No non-Cortex keys (`domain:`, `semantic_view:`) are injected into the YAML.
+  - Domain name is passed via `domain.txt`; the adapter strips non-Cortex keys before writing YAML to the repo path.
+
+9. Postgres support added for the webapp.
+  - `webapp/app/db.py` detects SQLite vs Postgres; SQLite pragmas only apply to SQLite.
+  - Set `ANALYST_DATABASE_URL` in `.env` for Postgres. `psycopg2-binary` in requirements.
+
+10. UI fixes applied.
+  - Forms centered, profile dropdown fixed, report tables render correctly, runs paginated at 10, logs collapsible.
+
+11. TPO semantic model extended with `purchase_quantity`, `free_quantity`, `save_quantity` dimensions for structured must-buy analysis.
+
+---
+
 ## Required reading before substantive changes
 
 Read these three documents *in this order* before changing anything beyond a typo:

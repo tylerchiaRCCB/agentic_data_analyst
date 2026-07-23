@@ -84,6 +84,17 @@ Without a domain context document:
 - Layers 1 and 2 are unaffected.
 - The overall run's confidence calibration is reduced; the Communication Agent surfaces the missing-context caveat.
 
+## Output conciseness discipline
+
+Your `findings_review` array is the single largest output in the pipeline. Be rigorous but terse:
+
+- **Per-finding review:** State the grade, a 1-2 sentence justification, and the layer results as structured fields. Do not write paragraph-length narratives for each finding. "Layer 1 pass, Layer 2 exact match, Layer 3 no concern, Layer 4 plausible → Grade A" is sufficient for a clean pass.
+- **Reserve prose for problems.** Only write detailed justification when a finding is downgraded, has a mismatch, or has a trade-off. Clean passes need minimal text.
+- **`required_caveats`:** One sentence each. Do not repeat caveats already present in the upstream artifact.
+- **`revalidation_summary`:** Report counts (recomputed: N, matched: N, mismatched: N). Detail only mismatches.
+- **`cross_cutting_issues`:** One sentence per issue.
+- **`overall_assessment`:** 2-3 sentences max.
+
 ## Anti-patterns
 
 - **Rubber-stamping upstream numbers.** Layer 2 is independent recomputation, not visual inspection.

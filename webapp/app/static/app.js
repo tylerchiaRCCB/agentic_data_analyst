@@ -1,3 +1,29 @@
+// Initialize Mermaid diagrams in reports
+if (typeof mermaid !== 'undefined') {
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'strict',
+    themeVariables: {
+      primaryColor: '#6366f1',
+      primaryTextColor: '#ffffff',
+      primaryBorderColor: '#4f46e5',
+      secondaryColor: '#a78bfa',
+      tertiaryColor: '#e0e7ff',
+      lineColor: '#6b7280',
+      textColor: '#171a21',
+      xyChart: {
+        plotColorPalette: '#6366f1,#8b5cf6,#a78bfa,#c4b5fd,#4f46e5,#818cf8'
+      }
+    },
+    xyChart: { width: 600, height: 400, plotReservedSpacePercent: 60 }
+  });
+  // Re-run after htmx swaps (e.g. when report loads via fragment)
+  document.addEventListener('htmx:afterSettle', function () {
+    mermaid.run({ querySelector: 'pre.mermaid' }).catch(function () {});
+  });
+}
+
 // Keep the live log panel pinned to the bottom unless the user scrolled up.
 document.addEventListener('htmx:beforeSwap', function (evt) {
   var panel = document.getElementById('log-panel');
